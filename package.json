@@ -1,0 +1,57 @@
+{
+  "name": "@predictdotfun/sdk",
+  "version": "0.0.1",
+  "license": "MIT",
+  "description": "A TypeScript SDK to help developers interface with the Predict's protocol.",
+  "homepage": "https://predict.fun/",
+  "bugs": "https://github.com/PredictDotFun/sdk/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PredictDotFun/sdk.git"
+  },
+  "scripts": {
+    "build": "rm -rf ./dist && tsc --project tsconfig.build.json",
+    "lint": "eslint \"**/*.{js,ts}\"",
+    "prepare": "husky",
+    "typecheck": "tsc --project tsconfig.build.json --noEmit",
+    "format:check": "prettier --check \"**/*.{js,ts,json,yaml,yml,md}\"",
+    "format:write": "prettier --write \"**/*.{js,ts,json,yaml,yml,md}\"",
+    "release": "release-it --only-version",
+    "test": "jest"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,json,yaml,yml}": "yarn format:write"
+  },
+  "peerDependencies": {
+    "ethers": "^6.7.0"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^1.1.1",
+    "@eslint/js": "^9.10.0",
+    "@types/jest": "^29.5.13",
+    "@types/node": "^22.5.5",
+    "@typescript-eslint/eslint-plugin": "^8.6.0",
+    "@typescript-eslint/parser": "^8.6.0",
+    "eslint": "^9.11.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-import-resolver-typescript": "^3.6.3",
+    "eslint-plugin-import": "^2.30.0",
+    "eslint-plugin-jest": "^28.8.3",
+    "eslint-plugin-jest-formatting": "^3.1.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "eslint-plugin-unicorn": "^55.0.0",
+    "ethers": "^6.13.2",
+    "husky": "^9.1.6",
+    "jest": "^29.7.0",
+    "lint-staged": "^15.2.10",
+    "prettier": "3.3.3",
+    "release-it": "^17.6.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": "^18.18.0 || ^20.9.0 || >=21.1.0",
+    "yarn": ">=1.22.11"
+  }
+}

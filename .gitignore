@@ -1,0 +1,34 @@
+# build
+dist/
+build/
+tmp/
+temp/
+out/
+
+# deps
+node_modules/
+
+# ts cache
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# envs
+.env
+.env.*
+
+# coverage
+coverage/
+coverage-e2e/
+coverage.json
+
+# keys
+*.pem
+*.ppk
+*.key
+
+# misc
+.DS_Store
