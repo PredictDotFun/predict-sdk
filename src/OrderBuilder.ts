@@ -124,10 +124,10 @@ export class OrderBuilder {
     }
   }
 
-  private async getApprovalOps(key: keyof Addresses, type: "ERC1155"): Promise<Erc1155Approval>;
-  private async getApprovalOps(key: keyof Addresses, type: "ERC20"): Promise<Erc20Approval>;
+  private getApprovalOps(key: keyof Addresses, type: "ERC1155"): Erc1155Approval;
+  private getApprovalOps(key: keyof Addresses, type: "ERC20"): Erc20Approval;
 
-  private async getApprovalOps(key: keyof Addresses, type: "ERC1155" | "ERC20"): Promise<Approval> {
+  private getApprovalOps(key: keyof Addresses, type: "ERC1155" | "ERC20"): Approval {
     const address = this.addresses[key];
 
     if (this.contracts === undefined) {
@@ -380,10 +380,8 @@ export class OrderBuilder {
    * Check and manage the approval for the CTF Exchange to transfer the Conditional Tokens.
    *
    * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the CTF Exchange.
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async ctfExchangeApproval(): Promise<Erc1155Approval> {
+  ctfExchangeApproval(): Erc1155Approval {
     return this.getApprovalOps("CTF_EXCHANGE", "ERC1155");
   }
 
@@ -391,10 +389,8 @@ export class OrderBuilder {
    * Check and manage the approval for the Neg Risk CTF Exchange to transfer the Conditional Tokens.
    *
    * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the Neg Risk CTF Exchange.
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async negRiskCtfExchangeApproval(): Promise<Erc1155Approval> {
+  negRiskCtfExchangeApproval(): Erc1155Approval {
     return this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC1155");
   }
 
@@ -402,10 +398,8 @@ export class OrderBuilder {
    * Check and manage the approval for the Neg Risk Adapter to transfer the Conditional Tokens.
    *
    * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the Neg Risk Adapter.
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async negRiskAdapterApproval(): Promise<Erc1155Approval> {
+  negRiskAdapterApproval(): Erc1155Approval {
     return this.getApprovalOps("NEG_RISK_ADAPTER", "ERC1155");
   }
 
@@ -413,10 +407,8 @@ export class OrderBuilder {
    * Check and manage the approval for the CTF Exchange to transfer the USDB collateral.
    *
    * @returns {Erc20Approval} The functions `allowance` and `approve` for the CTF Exchange.
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async ctfExchangeAllowance(): Promise<Erc20Approval> {
+  ctfExchangeAllowance(): Erc20Approval {
     return this.getApprovalOps("CTF_EXCHANGE", "ERC20");
   }
 
@@ -424,10 +416,8 @@ export class OrderBuilder {
    * Check and manage the approval for the Neg Risk CTF Exchange to transfer the USDB collateral.
    *
    * @returns {Erc20Approval} The functions `allowance` and `approve` for the Neg Risk CTF Exchange.
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async negRiskCtfExchangeAllowance(): Promise<Erc20Approval> {
+  negRiskCtfExchangeAllowance(): Erc20Approval {
     return this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC20");
   }
 
@@ -435,15 +425,11 @@ export class OrderBuilder {
    * Check and manage all the approvals required to interact with the Predict's protocol.
    *
    * @returns {Approvals} The functions to check and manage the approvals for ERC1155 (Conditional Tokens) and ERC20 (USDB).
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async getApprovals(): Promise<Approvals> {
-    const [erc1155Approvals, erc20Approvals] = await Promise.all([
-      Promise.all([this.ctfExchangeApproval(), this.negRiskCtfExchangeApproval(), this.negRiskAdapterApproval()]),
-      Promise.all([this.ctfExchangeAllowance(), this.negRiskCtfExchangeAllowance()]),
-    ]);
-
-    return { erc1155Approvals, erc20Approvals };
+  getApprovals(): Approvals {
+    return {
+      erc1155Approvals: [this.ctfExchangeApproval(), this.negRiskCtfExchangeApproval(), this.negRiskAdapterApproval()],
+      erc20Approvals: [this.ctfExchangeAllowance(), this.negRiskCtfExchangeAllowance()],
+    };
   }
 }
