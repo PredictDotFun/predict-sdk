@@ -1,4 +1,12 @@
 import type { Side, SignatureType } from "./Constants";
+import type {
+  BlastConditionalTokens,
+  BlastCTFExchange,
+  BlastNegRiskAdapter,
+  BlastNegRiskCtfExchange,
+  ERC20,
+} from "./typechain";
+import type { ContractTransactionResponse } from "ethers";
 
 export type BigIntString = string;
 
@@ -44,7 +52,10 @@ export interface OrderConfig {
 
 export interface Addresses {
   CTF_EXCHANGE: string;
-  NEG_CTF_EXCHANGE: string;
+  NEG_RISK_CTF_EXCHANGE: string;
+  NEG_RISK_ADAPTER: string;
+  CONDITIONAL_TOKENS: string;
+  USDB: string;
 }
 
 /**
@@ -178,6 +189,35 @@ export interface Book {
   updateTimestampMs: number;
   asks: DepthLevel[];
   bids: DepthLevel[];
+}
+
+/**
+ * Contracts
+ */
+
+export interface Contracts {
+  CTF_EXCHANGE: BlastCTFExchange;
+  NEG_RISK_CTF_EXCHANGE: BlastNegRiskCtfExchange;
+  NEG_RISK_ADAPTER: BlastNegRiskAdapter;
+  CONDITIONAL_TOKENS: BlastConditionalTokens;
+  USDB: ERC20;
+}
+
+export interface Erc1155Approval {
+  isApprovedForAll: () => Promise<boolean>;
+  setApprovalForAll: (approved?: boolean) => Promise<ContractTransactionResponse>;
+}
+
+export interface Erc20Approval {
+  allowance: () => Promise<bigint>;
+  approve: (amount?: bigint) => Promise<ContractTransactionResponse>;
+}
+
+export type Approval = Erc1155Approval | Erc20Approval;
+
+export interface Approvals {
+  erc1155Approvals: Erc1155Approval[];
+  erc20Approvals: Erc20Approval[];
 }
 
 /**

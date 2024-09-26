@@ -13,10 +13,22 @@ import type {
   ProcessedBookAmounts,
   SignedOrder,
   LimitHelperInput,
+  Contracts,
+  Erc1155Approval,
+  Erc20Approval,
+  Approval,
+  Approvals,
 } from "./Types";
 import type { BaseWallet } from "ethers";
 import type { ChainId } from "./Constants";
-import { parseEther, TypedDataEncoder, ZeroAddress } from "ethers";
+import type {
+  BlastConditionalTokens,
+  BlastCTFExchange,
+  BlastNegRiskAdapter,
+  BlastNegRiskCtfExchange,
+  ERC20,
+} from "./typechain";
+import { BaseContract, MaxUint256, parseEther, TypedDataEncoder, ZeroAddress } from "ethers";
 import {
   FailedOrderSignError,
   FailedTypedDataEncoderError,
@@ -35,7 +47,15 @@ import {
   OrderConfigByChainId,
   MAX_SALT,
   FIVE_MINUTES_SECONDS,
+  ProviderByChainId,
 } from "./Constants";
+import {
+  BlastConditionalTokensAbi,
+  BlastCTFExchangeAbi,
+  BlastNegRiskAdapterAbi,
+  BlastNegRiskCtfExchangeAbi,
+  ERC20Abi,
+} from "./abis";
 
 /**
  * @remarks The precision represents the number of decimals supported. By default, it's set to 18 (for wei).
@@ -63,6 +83,7 @@ export class OrderBuilder {
   private precision: bigint;
   private addresses: Addresses;
   private orderConfig: OrderConfig;
+  private contracts: Contracts | undefined;
   private generateOrderSalt: () => string;
 
   /**
@@ -80,6 +101,57 @@ export class OrderBuilder {
     this.addresses = options?.addresses ?? AddressesByChainId[chainId];
     this.generateOrderSalt = options?.generateSalt ?? generateOrderSalt;
     this.precision = options?.precision ? 10n ** BigInt(options.precision) : BigInt(1e18);
+
+    if (this.signer) {
+      if (!this.signer.provider) {
+        const provider = ProviderByChainId[chainId];
+        this.signer = this.signer.connect(provider);
+      }
+
+      const ctfExchange = new BaseContract(this.addresses.CTF_EXCHANGE, BlastCTFExchangeAbi);
+      const negRiskCtfExchange = new BaseContract(this.addresses.NEG_RISK_CTF_EXCHANGE, BlastNegRiskCtfExchangeAbi);
+      const negRiskAdapter = new BaseContract(this.addresses.NEG_RISK_ADAPTER, BlastNegRiskAdapterAbi);
+      const conditionalTokens = new BaseContract(this.addresses.CONDITIONAL_TOKENS, BlastConditionalTokensAbi);
+      const usdb = new BaseContract(this.addresses.USDB, ERC20Abi);
+
+      this.contracts = {
+        CTF_EXCHANGE: ctfExchange.connect(this.signer) as BlastCTFExchange,
+        NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange.connect(this.signer) as BlastNegRiskCtfExchange,
+        NEG_RISK_ADAPTER: negRiskAdapter.connect(this.signer) as BlastNegRiskAdapter,
+        CONDITIONAL_TOKENS: conditionalTokens.connect(this.signer) as BlastConditionalTokens,
+        USDB: usdb.connect(this.signer) as ERC20,
+      };
+    }
+  }
+
+  private async getApprovalOps(key: keyof Addresses, type: "ERC1155"): Promise<Erc1155Approval>;
+  private async getApprovalOps(key: keyof Addresses, type: "ERC20"): Promise<Erc20Approval>;
+
+  private async getApprovalOps(key: keyof Addresses, type: "ERC1155" | "ERC20"): Promise<Approval> {
+    const address = this.addresses[key];
+
+    if (this.contracts === undefined) {
+      throw new MissingSignerError();
+    }
+
+    switch (type) {
+      case "ERC1155": {
+        const contract = this.contracts.CONDITIONAL_TOKENS;
+
+        return {
+          isApprovedForAll: () => contract.isApprovedForAll(this.signer!.address, address),
+          setApprovalForAll: (approved: boolean = true) => contract.setApprovalForAll(address, approved),
+        };
+      }
+      case "ERC20": {
+        const contract = this.contracts.USDB;
+
+        return {
+          allowance: () => contract.allowance(this.signer!.address, address),
+          approve: (amount: bigint = MaxUint256) => contract.approve(address, amount),
+        };
+      }
+    }
   }
 
   /**
@@ -249,7 +321,7 @@ export class OrderBuilder {
         name: PROTOCOL_NAME,
         version: PROTOCOL_VERSION,
         chainId: this.chainId,
-        verifyingContract: isMultiOutcome ? this.addresses.NEG_CTF_EXCHANGE : this.addresses.CTF_EXCHANGE,
+        verifyingContract: isMultiOutcome ? this.addresses.NEG_RISK_CTF_EXCHANGE : this.addresses.CTF_EXCHANGE,
       },
       message: {
         ...order,
@@ -302,5 +374,76 @@ export class OrderBuilder {
     } catch (error) {
       throw new FailedTypedDataEncoderError(error as Error);
     }
+  }
+
+  /**
+   * Check and manage the approval for the CTF Exchange to transfer the Conditional Tokens.
+   *
+   * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the CTF Exchange.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async ctfExchangeApproval(): Promise<Erc1155Approval> {
+    return this.getApprovalOps("CTF_EXCHANGE", "ERC1155");
+  }
+
+  /**
+   * Check and manage the approval for the Neg Risk CTF Exchange to transfer the Conditional Tokens.
+   *
+   * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the Neg Risk CTF Exchange.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async negRiskCtfExchangeApproval(): Promise<Erc1155Approval> {
+    return this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC1155");
+  }
+
+  /**
+   * Check and manage the approval for the Neg Risk Adapter to transfer the Conditional Tokens.
+   *
+   * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the Neg Risk Adapter.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async negRiskAdapterApproval(): Promise<Erc1155Approval> {
+    return this.getApprovalOps("NEG_RISK_ADAPTER", "ERC1155");
+  }
+
+  /**
+   * Check and manage the approval for the CTF Exchange to transfer the USDB collateral.
+   *
+   * @returns {Erc20Approval} The functions `allowance` and `approve` for the CTF Exchange.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async ctfExchangeAllowance(): Promise<Erc20Approval> {
+    return this.getApprovalOps("CTF_EXCHANGE", "ERC20");
+  }
+
+  /**
+   * Check and manage the approval for the Neg Risk CTF Exchange to transfer the USDB collateral.
+   *
+   * @returns {Erc20Approval} The functions `allowance` and `approve` for the Neg Risk CTF Exchange.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async negRiskCtfExchangeAllowance(): Promise<Erc20Approval> {
+    return this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC20");
+  }
+
+  /**
+   * Check and manage all the approvals required to interact with the Predict's protocol.
+   *
+   * @returns {Approvals} The functions to check and manage the approvals for ERC1155 (Conditional Tokens) and ERC20 (USDB).
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async getApprovals(): Promise<Approvals> {
+    const [erc1155Approvals, erc20Approvals] = await Promise.all([
+      Promise.all([this.ctfExchangeApproval(), this.negRiskCtfExchangeApproval(), this.negRiskAdapterApproval()]),
+      Promise.all([this.ctfExchangeAllowance(), this.negRiskCtfExchangeAllowance()]),
+    ]);
+
+    return { erc1155Approvals, erc20Approvals };
   }
 }

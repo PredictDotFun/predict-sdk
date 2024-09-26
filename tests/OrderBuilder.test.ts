@@ -6,7 +6,9 @@ import { ChainId, Side, SignatureType } from "../src/Constants";
 import { InvalidQuantityError, InvalidExpirationError, MissingSignerError } from "../src/Errors";
 
 const mockSigner = {
-  signTypedData: jest.fn().mockResolvedValue("0xmocksignature"),
+  connect: jest.fn().mockReturnValue({
+    signTypedData: jest.fn().mockResolvedValue("0xmocksignature"),
+  }),
 } as unknown as BaseWallet;
 
 const toWei = (amount: number) => parseEther(amount.toString());

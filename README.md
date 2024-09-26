@@ -5,11 +5,11 @@ A TypeScript SDK to help developers interface with the Predict's protocol.
 This package has [ethers v6](https://docs.ethers.io/v6/) as a peer dependency.
 
 ```bash
-yarn add @predictdotfun/sdk ethers@6.x
+yarn add @predictdotfun/sdk ethers
 ```
 
 ```bash
-npm install @predictdotfun/sdk ethers@6.x
+npm install @predictdotfun/sdk ethers
 ```
 
 ## Limit Orders
@@ -30,7 +30,7 @@ import { Wallet } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
 // Create a wallet for signing orders
-const signer = new Wallet(process.env.YOUR_PRIVATE_KEY);
+const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
 
 // Create a new instance of the OrderBuilder class
 const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
@@ -92,7 +92,7 @@ import { Wallet } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
 // Create a wallet for signing orders
-const signer = new Wallet(process.env.YOUR_PRIVATE_KEY);
+const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
 
 // Create a new instance of the OrderBuilder class
 const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
@@ -140,6 +140,82 @@ async function main() {
     },
   };
 }
+```
+
+## Contracts
+
+To facilitate interactions with Predict's contracts we provide the necessary ABIs and some common functions to get you started.
+
+```ts
+import {
+  // Supported Chains
+  ChainId,
+
+  // Addresses
+  AddressesByChainId,
+
+  // Contract Interfaces
+  BlastCTFExchange,
+  BlastConditionalTokens,
+  BlastNegRiskAdapter,
+  BlastNegRiskCtfExchange,
+  ERC20,
+
+  // ABIs
+  BlastCTFExchangeAbi,
+  BlastNegRiskCtfExchangeAbi,
+  BlastNegRiskAdapterAbi,
+  BlastConditionalTokensAbi,
+  ERC20Abi,
+
+  // Approval utils
+  OrderBuilder,
+} from "@predictdotfun/sdk";
+import { BaseContract, MaxUint256 } from "ethers";
+
+// Create a new JsonRpcProvider instance
+const provider = new JsonRpcProvider(process.env.RPC_PROVIDER_URL);
+
+// Create a wallet to send the transactions on-chain
+const signer = new Wallet(process.env.WALLET_PRIVATE_KEY).connect(provider);
+
+/**
+ * Example contract interaction
+ */
+
+// Get the addresses for the given chain
+const addresses = AddressesByChainId[ChainId.BlastMainnet];
+
+// Create a new instance of a BaseContract and connect it to the signer
+const usdbContract = new BaseContract(this.addresses.USDB, ERC20Abi).connect(this.signer) as ERC20;
+
+// Make contract calls
+const tx = await usdbContract.approve(addresses.CTF_EXCHANGE, MaxUint256);
+
+// Await for the transaction result
+const receipt = await tx.wait();
+
+// Check for tx success
+const success = receipt.status === 1;
+
+/**
+ * Example approval via OrderBuilder
+ */
+
+// Create a new instance of the OrderBuilder class
+const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
+
+// Call one of the util functions, for e.g. `ctfExchangeAllowance`
+const { allowance, approve } = await builder.ctfExchangeAllowance();
+
+// Send the approval transaction for the maximum amount, or any other amount
+const tx = await approve(MaxUint256);
+
+// Await for the transaction result
+const receipt = await tx.wait();
+
+// Check for tx success
+const success = receipt.status === 1;
 ```
 
 ## License

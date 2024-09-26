@@ -42,15 +42,6 @@ export default [
     },
     rules: {
       "object-shorthand": "error",
-      "unicorn/filename-case": [
-        "error",
-        {
-          cases: {
-            camelCase: true,
-            pascalCase: true,
-          },
-        },
-      ],
       "import/order": [
         "warn",
         {
@@ -81,6 +72,7 @@ export default [
       "unicorn/prevent-abbreviations": "off",
       "unicorn/switch-case-braces": "off",
       "unicorn/prefer-top-level-await": "off",
+      "unicorn/filename-case": "off",
     },
   },
   {
