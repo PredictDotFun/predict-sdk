@@ -1,4 +1,12 @@
 import type { Side, SignatureType } from "./Constants";
+import type {
+  BlastConditionalTokens,
+  BlastCTFExchange,
+  BlastNegRiskAdapter,
+  BlastNegRiskCtfExchange,
+  ERC20,
+} from "./typechain";
+import type { ContractTransactionResponse } from "ethers";
 
 export type BigIntString = string;
 
@@ -44,7 +52,10 @@ export interface OrderConfig {
 
 export interface Addresses {
   CTF_EXCHANGE: string;
-  NEG_CTF_EXCHANGE: string;
+  NEG_RISK_CTF_EXCHANGE: string;
+  NEG_RISK_ADAPTER: string;
+  CONDITIONAL_TOKENS: string;
+  USDB: string;
 }
 
 /**
@@ -181,6 +192,67 @@ export interface Book {
 }
 
 /**
+ * Contracts
+ */
+
+export interface Contracts {
+  CTF_EXCHANGE: BlastCTFExchange;
+  NEG_RISK_CTF_EXCHANGE: BlastNegRiskCtfExchange;
+  NEG_RISK_ADAPTER: BlastNegRiskAdapter;
+  CONDITIONAL_TOKENS: BlastConditionalTokens;
+  USDB: ERC20;
+}
+
+export interface Erc1155Approval {
+  /**
+   * Check if the contract is approved to transfer the Conditional Tokens.
+   *
+   * @returns {Promise<boolean>} Whether the contract is approved for all
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  isApprovedForAll: () => Promise<boolean>;
+
+  /**
+   * Approve the contract to transfer the Conditional Tokens.
+   *
+   * @param {Promise<boolean>} approved - Whether to approve the contract to transfer the Conditional Tokens, defaults to `true`.
+   * @returns {Promise<ContractTransactionResponse>} The ethers' transaction response
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  setApprovalForAll: (approved?: boolean) => Promise<ContractTransactionResponse>;
+}
+
+export interface Erc20Approval {
+  /**
+   * Check the allowance of the contract for the USDB tokens.
+   *
+   * @returns {Promise<bigint>} The allowance of the contract for the USDB tokens.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  allowance: () => Promise<bigint>;
+
+  /**
+   * Approve the contract to transfer the USDB tokens.
+   *
+   * @param {bigint} amount - The amount of USDB tokens to approve for, defaults to `MaxUint256`.
+   * @returns {Promise<ContractTransactionResponse>} The ethers' transaction response.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  approve: (amount?: bigint) => Promise<ContractTransactionResponse>;
+}
+
+export type Approval = Erc1155Approval | Erc20Approval;
+
+export interface Approvals {
+  erc1155Approvals: NonEmptyArray<Erc1155Approval>;
+  erc20Approvals: NonEmptyArray<Erc20Approval>;
+}
+
+/**
  * Type utils
  */
 
@@ -191,3 +263,5 @@ export type Pretty<T> = {
   : never;
 
 export type Optional<T, K extends keyof T> = Pretty<Pick<Partial<T>, K> & Omit<T, K>>;
+
+export type NonEmptyArray<T> = [T, ...T[]];

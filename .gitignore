@@ -4,6 +4,7 @@ build/
 tmp/
 temp/
 out/
+typechain/
 
 # deps
 node_modules/

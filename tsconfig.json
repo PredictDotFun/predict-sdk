@@ -7,7 +7,6 @@
     "module": "CommonJS",
     "moduleResolution": "Node10",
     "baseUrl": "./",
-    "outDir": "./dist",
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo.json",
     "resolveJsonModule": true,
     "declaration": true,

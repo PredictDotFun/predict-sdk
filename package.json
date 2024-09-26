@@ -1,6 +1,6 @@
 {
   "name": "@predictdotfun/sdk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "MIT",
   "description": "A TypeScript SDK to help developers interface with the Predict's protocol.",
   "homepage": "https://predict.fun/",
@@ -9,15 +9,26 @@
     "type": "git",
     "url": "https://github.com/PredictDotFun/sdk.git"
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "scripts": {
-    "build": "rm -rf ./dist && tsc --project tsconfig.build.json",
+    "prepublishOnly": "yarn build",
+    "prebuild": "rm -rf ./src/typechain ./dist",
+    "build:ts": "tsc --project tsconfig.build.json",
+    "build:typechain": "typechain --target ethers-v6 --out-dir src/typechain src/abis/*.json",
+    "build": "yarn build:typechain && yarn build:ts",
     "lint": "eslint \"**/*.{js,ts}\"",
     "prepare": "husky",
     "typecheck": "tsc --project tsconfig.build.json --noEmit",
     "format:check": "prettier --check \"**/*.{js,ts,json,yaml,yml,md}\"",
     "format:write": "prettier --write \"**/*.{js,ts,json,yaml,yml,md}\"",
     "release": "release-it --only-version",
-    "test": "jest"
+    "test": "yarn build:typechain && jest"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,yaml,yml}": "yarn format:write"
@@ -28,6 +39,7 @@
   "devDependencies": {
     "@eslint/compat": "^1.1.1",
     "@eslint/js": "^9.10.0",
+    "@typechain/ethers-v6": "^0.5.1",
     "@types/jest": "^29.5.13",
     "@types/node": "^22.5.5",
     "@typescript-eslint/eslint-plugin": "^8.6.0",
@@ -48,6 +60,7 @@
     "release-it": "^17.6.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
+    "typechain": "^8.3.2",
     "typescript": "^5.6.2"
   },
   "engines": {
