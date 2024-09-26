@@ -9,6 +9,10 @@
     "type": "git",
     "url": "https://github.com/PredictDotFun/sdk.git"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "scripts": {
     "prepublishOnly": "yarn build",
     "prebuild": "rm -rf ./src/typechain ./dist",
