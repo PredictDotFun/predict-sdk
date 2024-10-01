@@ -130,7 +130,19 @@ export interface Order {
   signatureType: SignatureType;
 }
 
+export interface OrderWithHash extends Order {
+  /**
+   * The order hash
+   */
+  hash: string;
+}
+
 export interface SignedOrder extends Order {
+  /**
+   * The order hash
+   */
+  hash?: string;
+
   /**
    * The order signature
    */
@@ -283,13 +295,8 @@ export type TransactionResult = TransactionSuccess | TransactionFail;
  * Cancel Order
  */
 
-export interface CancelOrderInput {
-  order: Order;
-  isMultiOutcome: boolean;
-}
-
 export interface CancelOrdersInput {
-  orders: Order[];
+  orders: SignedOrder[];
   isMultiOutcome: boolean;
 }
 
