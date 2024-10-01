@@ -32,3 +32,12 @@ export class FailedTypedDataEncoderError extends Error {
     super("Failed to hash the order's typed data", { cause });
   }
 }
+
+export class InvalidMultiOutcomeConfig extends Error {
+  public readonly name = "InvalidMultiOutcomeConfig";
+  constructor() {
+    super(
+      "The token ID of one or more orders is not registered in the selected contract. Use `cancelOrder` when `isMultiOutcome` is true. Otherwise, use `cancelNegRiskOrder`.",
+    );
+  }
+}

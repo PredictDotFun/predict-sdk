@@ -1,6 +1,6 @@
 {
   "name": "@predictdotfun/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "MIT",
   "description": "A TypeScript SDK to help developers interface with the Predict's protocol.",
   "homepage": "https://predict.fun/",
@@ -36,7 +36,10 @@
     "*.{js,jsx,ts,tsx,json,yaml,yml}": "yarn format:write"
   },
   "peerDependencies": {
-    "ethers": "^6.7.0"
+    "ethers": "^6.11.0"
+  },
+  "dependencies": {
+    "ethers-multicall-provider": "^6.4.1"
   },
   "devDependencies": {
     "@eslint/compat": "^1.1.1",

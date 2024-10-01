@@ -7,19 +7,20 @@ import type {
   OrderStrategy,
   MarketHelperInput,
   Book,
-  Optional,
   DepthLevel,
   OrderAmounts,
   ProcessedBookAmounts,
   SignedOrder,
   LimitHelperInput,
-  Contracts,
   Erc1155Approval,
   Erc20Approval,
   Approval,
-  Approvals,
+  MulticallContracts,
+  TransactionResult,
+  CancelOrdersOptions,
+  SetApprovalsResult,
 } from "./Types";
-import type { BaseWallet } from "ethers";
+import type { AbstractProvider, BaseWallet, BigNumberish } from "ethers";
 import type { ChainId } from "./Constants";
 import type {
   BlastConditionalTokens,
@@ -28,11 +29,15 @@ import type {
   BlastNegRiskCtfExchange,
   ERC20,
 } from "./typechain";
-import { BaseContract, MaxUint256, parseEther, TypedDataEncoder, ZeroAddress } from "ethers";
+import type { OrderStruct } from "./typechain/BlastCTFExchange";
+import type { ContractFunction, Optional } from "./internal/Types";
+import { BaseContract, MaxInt256, MaxUint256, parseEther, TypedDataEncoder, ZeroAddress } from "ethers";
+import { MulticallWrapper } from "ethers-multicall-provider";
 import {
   FailedOrderSignError,
   FailedTypedDataEncoderError,
   InvalidExpirationError,
+  InvalidMultiOutcomeConfig,
   InvalidQuantityError,
   MissingSignerError,
 } from "./Errors";
@@ -83,7 +88,7 @@ export class OrderBuilder {
   private precision: bigint;
   private addresses: Addresses;
   private orderConfig: OrderConfig;
-  private contracts: Contracts | undefined;
+  private contracts: MulticallContracts | undefined;
   private generateOrderSalt: () => string;
 
   /**
@@ -103,8 +108,10 @@ export class OrderBuilder {
     this.precision = options?.precision ? 10n ** BigInt(options.precision) : BigInt(1e18);
 
     if (this.signer) {
+      const provider = this.signer.provider ?? ProviderByChainId[chainId];
+      const multicallProvider = MulticallWrapper.wrap(provider as AbstractProvider);
+
       if (!this.signer.provider) {
-        const provider = ProviderByChainId[chainId];
         this.signer = this.signer.connect(provider);
       }
 
@@ -120,13 +127,62 @@ export class OrderBuilder {
         NEG_RISK_ADAPTER: negRiskAdapter.connect(this.signer) as BlastNegRiskAdapter,
         CONDITIONAL_TOKENS: conditionalTokens.connect(this.signer) as BlastConditionalTokens,
         USDB: usdb.connect(this.signer) as ERC20,
+        multicall: {
+          CTF_EXCHANGE: ctfExchange.connect(multicallProvider) as BlastCTFExchange,
+          NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange.connect(multicallProvider) as BlastNegRiskCtfExchange,
+          NEG_RISK_ADAPTER: negRiskAdapter.connect(multicallProvider) as BlastNegRiskAdapter,
+          CONDITIONAL_TOKENS: conditionalTokens.connect(multicallProvider) as BlastConditionalTokens,
+          USDB: usdb.connect(multicallProvider) as ERC20,
+        },
       };
+    }
+  }
+
+  /**
+   * Helper function to handle transactions safely.
+   *
+   * @private
+   * @async
+   * @param {ContractFunction<T>} fn - The contract function to execute.
+   * @param {...T} args - The arguments to pass to the contract function.
+   * @returns {Promise<TransactionResult>} The result of the transaction.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  private async handleTransaction<T extends unknown[]>(
+    fn: ContractFunction<T>,
+    ...args: T
+  ): Promise<TransactionResult> {
+    if (this.contracts === undefined) {
+      throw new MissingSignerError();
+    }
+
+    try {
+      const estimatedGas = await fn.estimateGas(...args);
+      const transactionArgs = [...args, { gasLimit: (estimatedGas * 125n) / 100n }] as T;
+
+      const tx = await fn(...transactionArgs);
+      const receipt = await tx.wait(1);
+
+      return receipt?.status === 1 ? { success: true, receipt } : { success: false, receipt };
+    } catch (error) {
+      return { success: false, cause: error as Error };
     }
   }
 
   private getApprovalOps(key: keyof Addresses, type: "ERC1155"): Erc1155Approval;
   private getApprovalOps(key: keyof Addresses, type: "ERC20"): Erc20Approval;
 
+  /**
+   * Helper function to get the approval operations for the given contract and type.
+   *
+   * @private
+   * @param {keyof Addresses} key - The key of the contract in the `Addresses` object.
+   * @param {"ERC1155" | "ERC20"} type - The type of approval to get.
+   * @returns {Approval} The approval operations for the given contract and type.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
   private getApprovalOps(key: keyof Addresses, type: "ERC1155" | "ERC20"): Approval {
     const address = this.addresses[key];
 
@@ -140,7 +196,8 @@ export class OrderBuilder {
 
         return {
           isApprovedForAll: () => contract.isApprovedForAll(this.signer!.address, address),
-          setApprovalForAll: (approved: boolean = true) => contract.setApprovalForAll(address, approved),
+          setApprovalForAll: (approved: boolean = true) =>
+            this.handleTransaction(contract.setApprovalForAll, address, approved),
         };
       }
       case "ERC20": {
@@ -148,7 +205,7 @@ export class OrderBuilder {
 
         return {
           allowance: () => contract.allowance(this.signer!.address, address),
-          approve: (amount: bigint = MaxUint256) => contract.approve(address, amount),
+          approve: (amount: bigint = MaxUint256) => this.handleTransaction(contract.approve, address, amount),
         };
       }
     }
@@ -379,57 +436,245 @@ export class OrderBuilder {
   /**
    * Check and manage the approval for the CTF Exchange to transfer the Conditional Tokens.
    *
-   * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the CTF Exchange.
+   * @param {boolean} [approved=true] - Whether to approve the CTF Exchange to transfer the Conditional Tokens.
+   * @returns {Promise<TransactionResult>} The result of the approval transaction.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  ctfExchangeApproval(): Erc1155Approval {
-    return this.getApprovalOps("CTF_EXCHANGE", "ERC1155");
+  async setCtfExchangeApproval(approved: boolean = true): Promise<TransactionResult> {
+    const { isApprovedForAll, setApprovalForAll } = this.getApprovalOps("CTF_EXCHANGE", "ERC1155");
+
+    const isApproved = await isApprovedForAll();
+
+    if (isApproved !== approved) {
+      return setApprovalForAll(approved);
+    }
+
+    return { success: true };
   }
 
   /**
    * Check and manage the approval for the Neg Risk CTF Exchange to transfer the Conditional Tokens.
    *
-   * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the Neg Risk CTF Exchange.
+   * @param {boolean} [approved=true] - Whether to approve the Neg Risk CTF Exchange to transfer the Conditional Tokens.
+   * @returns {Promise<TransactionResult>} The result of the approval transaction.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  negRiskCtfExchangeApproval(): Erc1155Approval {
-    return this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC1155");
+  async setNegRiskCtfExchangeApproval(approved: boolean = true): Promise<TransactionResult> {
+    const { isApprovedForAll, setApprovalForAll } = this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC1155");
+
+    const isApproved = await isApprovedForAll();
+
+    if (isApproved !== approved) {
+      return setApprovalForAll(approved);
+    }
+
+    return { success: true };
   }
 
   /**
    * Check and manage the approval for the Neg Risk Adapter to transfer the Conditional Tokens.
    *
-   * @returns {Erc1155Approval} The functions `isApprovedForAll` and `setApprovalForAll` for the Neg Risk Adapter.
+   * @param {boolean} [approved=true] - Whether to approve the Neg Risk Adapter to transfer the Conditional Tokens.
+   * @returns {Promise<TransactionResult>} The result of the approval transaction.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  negRiskAdapterApproval(): Erc1155Approval {
-    return this.getApprovalOps("NEG_RISK_ADAPTER", "ERC1155");
+  async setNegRiskAdapterApproval(approved: boolean = true): Promise<TransactionResult> {
+    const { isApprovedForAll, setApprovalForAll } = this.getApprovalOps("NEG_RISK_ADAPTER", "ERC1155");
+
+    const isApproved = await isApprovedForAll();
+
+    if (isApproved !== approved) {
+      return setApprovalForAll(approved);
+    }
+
+    return { success: true };
   }
 
   /**
    * Check and manage the approval for the CTF Exchange to transfer the USDB collateral.
    *
-   * @returns {Erc20Approval} The functions `allowance` and `approve` for the CTF Exchange.
+   * @param {bigint} [minAmount=MaxInt256] - The minimum amount of USDB tokens to approve for.
+   * @param {bigint} [maxAmount=MaxUint256] - The maximum amount of USDB tokens to approve for.
+   * @returns {Promise<TransactionResult>} The result of the approval transaction.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  ctfExchangeAllowance(): Erc20Approval {
-    return this.getApprovalOps("CTF_EXCHANGE", "ERC20");
+  async setCtfExchangeAllowance(
+    minAmount: bigint = MaxInt256,
+    maxAmount: bigint = MaxUint256,
+  ): Promise<TransactionResult> {
+    const { allowance, approve } = this.getApprovalOps("CTF_EXCHANGE", "ERC20");
+
+    const currentAllowance = await allowance();
+
+    if (currentAllowance < minAmount) {
+      return approve(maxAmount);
+    }
+
+    return { success: true };
   }
 
   /**
    * Check and manage the approval for the Neg Risk CTF Exchange to transfer the USDB collateral.
    *
-   * @returns {Erc20Approval} The functions `allowance` and `approve` for the Neg Risk CTF Exchange.
+   * @param {bigint} [minAmount=MaxInt256] - The minimum amount of USDB tokens to approve for.
+   * @param {bigint} [maxAmount=MaxUint256] - The maximum amount of USDB tokens to approve for.
+   * @returns {Promise<TransactionResult>} The result of the approval transaction.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  negRiskCtfExchangeAllowance(): Erc20Approval {
-    return this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC20");
+  async setNegRiskCtfExchangeAllowance(
+    minAmount: bigint = MaxInt256,
+    maxAmount: bigint = MaxUint256,
+  ): Promise<TransactionResult> {
+    const { allowance, approve } = this.getApprovalOps("NEG_RISK_CTF_EXCHANGE", "ERC20");
+
+    const currentAllowance = await allowance();
+
+    if (currentAllowance < minAmount) {
+      return approve(maxAmount);
+    }
+
+    return { success: true };
   }
 
   /**
-   * Check and manage all the approvals required to interact with the Predict's protocol.
+   * Sets all necessary approvals for trading on the Predict protocol.
    *
-   * @returns {Approvals} The functions to check and manage the approvals for ERC1155 (Conditional Tokens) and ERC20 (USDB).
+   * @returns {Promise<SetApprovalsResult>} An object containing:
+   *   - success: A boolean indicating if all approvals were successful.
+   *   - transactions: An array of TransactionResult objects for each approval operation.
+   *
+   * @throws {MissingSignerError} If a signer was not provided when instantiating the OrderBuilder.
    */
-  getApprovals(): Approvals {
-    return {
-      erc1155Approvals: [this.ctfExchangeApproval(), this.negRiskCtfExchangeApproval(), this.negRiskAdapterApproval()],
-      erc20Approvals: [this.ctfExchangeAllowance(), this.negRiskCtfExchangeAllowance()],
-    };
+
+  async setApprovals(): Promise<SetApprovalsResult> {
+    const results: TransactionResult[] = [];
+    const approvals = [
+      this.setCtfExchangeApproval.bind(this),
+      this.setNegRiskCtfExchangeApproval.bind(this),
+      this.setNegRiskAdapterApproval.bind(this),
+      this.setCtfExchangeAllowance.bind(this),
+      this.setNegRiskCtfExchangeAllowance.bind(this),
+    ];
+
+    for (const approval of approvals) {
+      const result = await approval();
+      results.push(result);
+    }
+
+    const success = results.every((r) => r.success);
+
+    return { success, transactions: results };
+  }
+
+  /**
+   * Cancels orders for the CTF Exchange or Neg Risk CTF Exchange.
+   *
+   * @private
+   * @async
+   * @param {BlastCTFExchange["cancelOrders"]} cancelOrders - The function to cancel the orders.
+   * @param {Order[]} orders - The orders to cancel.
+   * @returns {Promise<TransactionResult>} The result of the cancellation.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  private async _cancelOrders(
+    cancelOrders: BlastCTFExchange["cancelOrders"],
+    orders: Order[],
+  ): Promise<TransactionResult> {
+    const orderStructs = orders as OrderStruct[];
+    if (orderStructs.length === 0) {
+      return { success: true };
+    }
+
+    return this.handleTransaction(cancelOrders, orderStructs);
+  }
+
+  /**
+   * Validates the token IDs against the CTF Exchange or Neg Risk CTF Exchange based on the `isMultiOutcome` flag.
+   *
+   * @async
+   * @param {BigNumberish[]} tokenIds - The token IDs to validate.
+   * @param {boolean} isMultiOutcome - Whether the order is for a multi-outcome market.
+   * @returns {Promise<boolean>} Whether the token IDs are valid.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   */
+  async validateTokenIds(tokenIds: BigNumberish[], isMultiOutcome: boolean): Promise<boolean> {
+    if (!this.contracts) {
+      throw new MissingSignerError();
+    }
+
+    const multicall = this.contracts.multicall;
+    const validations = tokenIds.map((tokenId) =>
+      isMultiOutcome
+        ? multicall.NEG_RISK_CTF_EXCHANGE.validateTokenId(tokenId)
+        : multicall.CTF_EXCHANGE.validateTokenId(tokenId),
+    );
+
+    const results = await Promise.allSettled(validations);
+    return results.every((result) => result.status === "fulfilled");
+  }
+
+  /**
+   * Cancels orders for the CTF Exchange. (isMultiOutcome: false)
+   *
+   * @async
+   * @param {Order[]} orders - The orders to cancel.
+   * @param {CancelOrdersOptions} [options] - The options for the cancellation.
+   * @returns {Promise<TransactionResult>} The result of the cancellation.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   * @throws {InvalidMultiOutcomeConfig} If the token IDs are invalid for the CTF Exchange.
+   */
+  async cancelOrders(orders: Order[], options?: CancelOrdersOptions): Promise<TransactionResult> {
+    if (!this.contracts) {
+      throw new MissingSignerError();
+    }
+
+    if (options?.withValidation ?? true) {
+      const tokenIds = orders.map((order) => order.tokenId);
+      const isValid = await this.validateTokenIds(tokenIds, false);
+
+      if (!isValid) {
+        throw new InvalidMultiOutcomeConfig();
+      }
+    }
+
+    const cancelOrders = this.contracts.CTF_EXCHANGE.cancelOrders;
+    return this._cancelOrders(cancelOrders, orders);
+  }
+
+  /**
+   * Cancels orders for the Neg Risk CTF Exchange. (isMultiOutcome: true)
+   *
+   * @async
+   * @param {Order[]} orders - The orders to cancel.
+   * @param {CancelOrdersOptions} [options] - The options for the cancellation.
+   * @returns {Promise<TransactionResult>} The result of the cancellation.
+   *
+   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
+   * @throws {InvalidMultiOutcomeConfig} If the token IDs are invalid for the Neg Risk CTF Exchange.
+   */
+  async cancelNegRiskOrders(orders: Order[], options?: CancelOrdersOptions): Promise<TransactionResult> {
+    if (!this.contracts) {
+      throw new MissingSignerError();
+    }
+
+    if (options?.withValidation ?? true) {
+      const tokenIds = orders.map((order) => order.tokenId);
+      const isValid = await this.validateTokenIds(tokenIds, true);
+
+      if (!isValid) {
+        throw new InvalidMultiOutcomeConfig();
+      }
+    }
+
+    const cancelOrders = this.contracts.NEG_RISK_CTF_EXCHANGE.cancelOrders;
+    return this._cancelOrders(cancelOrders, orders);
   }
 }

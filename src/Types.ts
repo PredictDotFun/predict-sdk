@@ -6,7 +6,7 @@ import type {
   BlastNegRiskCtfExchange,
   ERC20,
 } from "./typechain";
-import type { ContractTransactionResponse } from "ethers";
+import type { ContractTransactionReceipt } from "ethers";
 
 export type BigIntString = string;
 
@@ -203,6 +203,10 @@ export interface Contracts {
   USDB: ERC20;
 }
 
+export interface MulticallContracts extends Contracts {
+  multicall: Contracts;
+}
+
 export interface Erc1155Approval {
   /**
    * Check if the contract is approved to transfer the Conditional Tokens.
@@ -217,11 +221,11 @@ export interface Erc1155Approval {
    * Approve the contract to transfer the Conditional Tokens.
    *
    * @param {Promise<boolean>} approved - Whether to approve the contract to transfer the Conditional Tokens, defaults to `true`.
-   * @returns {Promise<ContractTransactionResponse>} The ethers' transaction response
+   * @returns {Promise<TransactionResult>} The transaction result.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  setApprovalForAll: (approved?: boolean) => Promise<ContractTransactionResponse>;
+  setApprovalForAll: (approved?: boolean) => Promise<TransactionResult>;
 }
 
 export interface Erc20Approval {
@@ -238,30 +242,58 @@ export interface Erc20Approval {
    * Approve the contract to transfer the USDB tokens.
    *
    * @param {bigint} amount - The amount of USDB tokens to approve for, defaults to `MaxUint256`.
-   * @returns {Promise<ContractTransactionResponse>} The ethers' transaction response.
+   * @returns {Promise<TransactionResult>} The transaction result.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  approve: (amount?: bigint) => Promise<ContractTransactionResponse>;
+  approve: (amount?: bigint) => Promise<TransactionResult>;
 }
 
 export type Approval = Erc1155Approval | Erc20Approval;
 
-export interface Approvals {
-  erc1155Approvals: NonEmptyArray<Erc1155Approval>;
-  erc20Approvals: NonEmptyArray<Erc20Approval>;
+/**
+ * Represents the result of setting approvals for trading on the Predict protocol.
+ *
+ * @property {boolean} success - Indicates if all approvals were successful.
+ * @property {TransactionResult[]} transactions - Array of transaction results for each approval operation.
+ */
+export interface SetApprovalsResult {
+  success: boolean;
+  transactions: TransactionResult[];
 }
 
 /**
- * Type utils
+ * Transaction Result
  */
 
-export type Pretty<T> = {
-  [K in keyof T]: T[K];
-} extends infer U
-  ? U
-  : never;
+export type TransactionSuccess = {
+  success: true;
+  receipt?: ContractTransactionReceipt;
+};
 
-export type Optional<T, K extends keyof T> = Pretty<Pick<Partial<T>, K> & Omit<T, K>>;
+export type TransactionFail = {
+  success: false;
+  cause?: Error;
+  receipt?: ContractTransactionReceipt | null;
+};
 
-export type NonEmptyArray<T> = [T, ...T[]];
+export type TransactionResult = TransactionSuccess | TransactionFail;
+
+/**
+ * Cancel Order
+ */
+
+export interface CancelOrderInput {
+  order: Order;
+  isMultiOutcome: boolean;
+}
+
+export interface CancelOrdersInput {
+  orders: Order[];
+  isMultiOutcome: boolean;
+}
+
+export interface CancelOrdersOptions {
+  /** Default: true */
+  withValidation?: boolean;
+}

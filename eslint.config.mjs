@@ -12,7 +12,7 @@ const compat = new FlatCompat({
 
 export default [
   {
-    ignores: ["**/dist", "**/build", "**/docs", "**/*.md", "jest.*"],
+    ignores: ["**/dist", "**/build", "**/docs", "**/*.md", "jest.*", "**/typechain"],
   },
   ...compat.extends(
     "plugin:@typescript-eslint/eslint-recommended",
