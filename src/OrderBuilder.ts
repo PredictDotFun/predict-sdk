@@ -3,7 +3,6 @@ import type {
   BuildOrderInput,
   EIP712TypedData,
   Order,
-  OrderConfig,
   OrderStrategy,
   MarketHelperInput,
   Book,
@@ -37,7 +36,7 @@ import {
   FailedOrderSignError,
   FailedTypedDataEncoderError,
   InvalidExpirationError,
-  InvalidMultiOutcomeConfig,
+  InvalidNegRiskConfig,
   InvalidQuantityError,
   MissingSignerError,
 } from "./Errors";
@@ -49,7 +48,6 @@ import {
   PROTOCOL_VERSION,
   SignatureType,
   AddressesByChainId,
-  OrderConfigByChainId,
   MAX_SALT,
   FIVE_MINUTES_SECONDS,
   ProviderByChainId,
@@ -67,7 +65,6 @@ import {
  */
 interface OrderBuilderOptions {
   addresses?: Addresses;
-  orderConfig?: OrderConfig;
   precision?: number;
   generateSalt?: () => string;
 }
@@ -87,7 +84,6 @@ export const generateOrderSalt = (): string => {
 export class OrderBuilder {
   private precision: bigint;
   private addresses: Addresses;
-  private orderConfig: OrderConfig;
   private contracts: MulticallContracts | undefined;
   private generateOrderSalt: () => string;
 
@@ -102,7 +98,6 @@ export class OrderBuilder {
     private readonly signer?: BaseWallet,
     private readonly options?: OrderBuilderOptions,
   ) {
-    this.orderConfig = options?.orderConfig ?? OrderConfigByChainId[chainId];
     this.addresses = options?.addresses ?? AddressesByChainId[chainId];
     this.generateOrderSalt = options?.generateSalt ?? generateOrderSalt;
     this.precision = options?.precision ? 10n ** BigInt(options.precision) : BigInt(1e18);
@@ -319,6 +314,8 @@ export class OrderBuilder {
 
   /**
    * Builds an order based on the provided strategy and order data.
+   *
+   * @remarks The current `feeRateBps` should be fetched via the `GET /markets` endpoint.
    * @remarks The expiration for market orders is ignored.
    *
    * @param {OrderStrategy} strategy - The order strategy (e.g., 'MARKET' or 'LIMIT').
@@ -352,7 +349,7 @@ export class OrderBuilder {
       takerAmount: String(data.takerAmount),
       expiration: String(strategy === "MARKET" ? marketExpiration : limitExpiration),
       nonce: String(data.nonce ?? 0n),
-      feeRateBps: String(data.feeRateBps ?? this.orderConfig.feeRateBps),
+      feeRateBps: String(data.feeRateBps),
       side: data.side,
       signatureType: data.signatureType ?? SignatureType.EOA,
     };
@@ -361,13 +358,13 @@ export class OrderBuilder {
   /**
    * Builds the typed data for an order.
    *
-   * @remarks The param `isMultiOutcome` can be found via the `GET /markets` endpoint.
+   * @remarks The param `isNegRisk` can be found via the `GET /markets` or `GET /categories` endpoints.
    *
    * @param {Order} order - The order to build the typed data for.
-   * @param {boolean} isMultiOutcome - Whether the order is for a multi-outcome market.
+   * @param {boolean} options.isNegRisk - Whether the order is for a neg risk market (winner takes all).
    * @returns {EIP712TypedData} The typed data for the order.
    */
-  buildTypedData(order: Order, isMultiOutcome: boolean): EIP712TypedData {
+  buildTypedData(order: Order, options: { isNegRisk: boolean }): EIP712TypedData {
     return {
       primaryType: "Order",
       types: {
@@ -378,7 +375,7 @@ export class OrderBuilder {
         name: PROTOCOL_NAME,
         version: PROTOCOL_VERSION,
         chainId: this.chainId,
-        verifyingContract: isMultiOutcome ? this.addresses.NEG_RISK_CTF_EXCHANGE : this.addresses.CTF_EXCHANGE,
+        verifyingContract: options.isNegRisk ? this.addresses.NEG_RISK_CTF_EXCHANGE : this.addresses.CTF_EXCHANGE,
       },
       message: {
         ...order,
@@ -388,11 +385,10 @@ export class OrderBuilder {
 
   /**
    * Signs an order using the EIP-712 typed data standard.
-   * @remarks The param `isMultiOutcome` can be found via the `GET /markets` endpoint.
+   * @remarks The param `isNegRisk` can be found via the `GET /markets` endpoint.
    *
    * @async
-   * @param {Order} order - The order to sign.
-   * @param {boolean} isMultiOutcome - Whether the order is for a multi-outcome market.
+   * @param {EIP712TypedData} typedData - The typed data for the order to sign.
    * @returns {Promise<SignedOrder>} The signed order.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
@@ -595,23 +591,23 @@ export class OrderBuilder {
   }
 
   /**
-   * Validates the token IDs against the CTF Exchange or Neg Risk CTF Exchange based on the `isMultiOutcome` flag.
+   * Validates the token IDs against the CTF Exchange or Neg Risk CTF Exchange based on the `isNegRisk` flag.
    *
    * @async
    * @param {BigNumberish[]} tokenIds - The token IDs to validate.
-   * @param {boolean} isMultiOutcome - Whether the order is for a multi-outcome market.
+   * @param {boolean} isNegRisk - Whether the order is for a multi-outcome market.
    * @returns {Promise<boolean>} Whether the token IDs are valid.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
    */
-  async validateTokenIds(tokenIds: BigNumberish[], isMultiOutcome: boolean): Promise<boolean> {
+  async validateTokenIds(tokenIds: BigNumberish[], isNegRisk: boolean): Promise<boolean> {
     if (!this.contracts) {
       throw new MissingSignerError();
     }
 
     const multicall = this.contracts.multicall;
     const validations = tokenIds.map((tokenId) =>
-      isMultiOutcome
+      isNegRisk
         ? multicall.NEG_RISK_CTF_EXCHANGE.validateTokenId(tokenId)
         : multicall.CTF_EXCHANGE.validateTokenId(tokenId),
     );
@@ -621,7 +617,7 @@ export class OrderBuilder {
   }
 
   /**
-   * Cancels orders for the CTF Exchange. (isMultiOutcome: false)
+   * Cancels orders for the CTF Exchange. (isNegRisk: false)
    *
    * @async
    * @param {Order[]} orders - The orders to cancel.
@@ -629,7 +625,7 @@ export class OrderBuilder {
    * @returns {Promise<TransactionResult>} The result of the cancellation.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
-   * @throws {InvalidMultiOutcomeConfig} If the token IDs are invalid for the CTF Exchange.
+   * @throws {InvalidNegRiskConfig} If the token IDs are invalid for the CTF Exchange.
    */
   async cancelOrders(orders: Order[], options?: CancelOrdersOptions): Promise<TransactionResult> {
     if (!this.contracts) {
@@ -641,7 +637,7 @@ export class OrderBuilder {
       const isValid = await this.validateTokenIds(tokenIds, false);
 
       if (!isValid) {
-        throw new InvalidMultiOutcomeConfig();
+        throw new InvalidNegRiskConfig();
       }
     }
 
@@ -650,7 +646,7 @@ export class OrderBuilder {
   }
 
   /**
-   * Cancels orders for the Neg Risk CTF Exchange. (isMultiOutcome: true)
+   * Cancels orders for the Neg Risk CTF Exchange. (isNegRisk: true)
    *
    * @async
    * @param {Order[]} orders - The orders to cancel.
@@ -658,7 +654,7 @@ export class OrderBuilder {
    * @returns {Promise<TransactionResult>} The result of the cancellation.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
-   * @throws {InvalidMultiOutcomeConfig} If the token IDs are invalid for the Neg Risk CTF Exchange.
+   * @throws {InvalidNegRiskConfig} If the token IDs are invalid for the Neg Risk CTF Exchange.
    */
   async cancelNegRiskOrders(orders: Order[], options?: CancelOrdersOptions): Promise<TransactionResult> {
     if (!this.contracts) {
@@ -670,7 +666,7 @@ export class OrderBuilder {
       const isValid = await this.validateTokenIds(tokenIds, true);
 
       if (!isValid) {
-        throw new InvalidMultiOutcomeConfig();
+        throw new InvalidNegRiskConfig();
       }
     }
 

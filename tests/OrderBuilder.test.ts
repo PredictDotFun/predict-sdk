@@ -97,6 +97,7 @@ describe("OrderBuilder", () => {
         tokenId: "123",
         makerAmount: toWei(10),
         takerAmount: toWei(5),
+        feeRateBps: 0,
       });
 
       expect(order.salt).toBe("1234");
@@ -120,6 +121,7 @@ describe("OrderBuilder", () => {
         tokenId: "456",
         makerAmount: toWei(5),
         takerAmount: toWei(10),
+        feeRateBps: 0,
       });
 
       expect(order.salt).toBe("1234");
@@ -146,6 +148,7 @@ describe("OrderBuilder", () => {
           makerAmount: toWei(10),
           takerAmount: toWei(5),
           expiresAt: new Date("2024-01-01T00:00:00Z"),
+          feeRateBps: 0,
         }),
       ).toThrow(InvalidExpirationError);
     });
@@ -160,9 +163,10 @@ describe("OrderBuilder", () => {
         tokenId: "123",
         makerAmount: toWei(10),
         takerAmount: toWei(5),
+        feeRateBps: 0,
       });
 
-      const typedData = orderBuilder.buildTypedData(order, false);
+      const typedData = orderBuilder.buildTypedData(order, { isNegRisk: false });
 
       expect(typedData.primaryType).toBe("Order");
       expect(typedData.domain.name).toBe("predict.fun CTF Exchange");
@@ -180,9 +184,10 @@ describe("OrderBuilder", () => {
         tokenId: "123",
         makerAmount: toWei(10),
         takerAmount: toWei(5),
+        feeRateBps: 0,
       });
 
-      const typedData = orderBuilder.buildTypedData(order, false);
+      const typedData = orderBuilder.buildTypedData(order, { isNegRisk: false });
       const signedOrder = await orderBuilder.signTypedDataOrder(typedData);
 
       expect(signedOrder).toEqual({
@@ -200,9 +205,10 @@ describe("OrderBuilder", () => {
         tokenId: "123",
         makerAmount: toWei(10),
         takerAmount: toWei(5),
+        feeRateBps: 0,
       });
 
-      const typedData = orderBuilderWithoutSigner.buildTypedData(order, false);
+      const typedData = orderBuilderWithoutSigner.buildTypedData(order, { isNegRisk: false });
 
       await expect(orderBuilderWithoutSigner.signTypedDataOrder(typedData)).rejects.toThrow(MissingSignerError);
     });
@@ -217,9 +223,10 @@ describe("OrderBuilder", () => {
         tokenId: "123",
         makerAmount: toWei(10),
         takerAmount: toWei(5),
+        feeRateBps: 0,
       });
 
-      const typedData = orderBuilder.buildTypedData(order, false);
+      const typedData = orderBuilder.buildTypedData(order, { isNegRisk: false });
       const hash = orderBuilder.buildTypedDataHash(typedData);
 
       expect(typeof hash).toBe("string");

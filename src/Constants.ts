@@ -1,4 +1,4 @@
-import type { Addresses, OrderConfig } from "./Types";
+import type { Addresses } from "./Types";
 import { JsonRpcProvider } from "ethers";
 
 export const MAX_SALT = 2_147_483_648;
@@ -44,18 +44,6 @@ export const ProviderByChainId = {
   [ChainId.BlastMainnet]: new JsonRpcProvider("https://rpc.blast.io/"),
   [ChainId.BlastSepolia]: new JsonRpcProvider("https://sepolia.blast.io/"),
 } satisfies Record<ChainId, JsonRpcProvider>;
-
-/**
- * @remarks The fee rate is only applied on the taker's side.
- */
-export const OrderConfigByChainId = {
-  [ChainId.BlastMainnet]: {
-    feeRateBps: "50",
-  },
-  [ChainId.BlastSepolia]: {
-    feeRateBps: "50",
-  },
-} satisfies Record<ChainId, OrderConfig>;
 
 export const PROTOCOL_NAME = "predict.fun CTF Exchange";
 export const PROTOCOL_VERSION = "1";
