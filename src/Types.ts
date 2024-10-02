@@ -46,10 +46,6 @@ export interface OrderAmounts {
  * Configuration
  */
 
-export interface OrderConfig {
-  feeRateBps: BigIntString;
-}
-
 export interface Addresses {
   CTF_EXCHANGE: string;
   NEG_RISK_CTF_EXCHANGE: string;
@@ -155,12 +151,13 @@ export interface BuildOrderInput {
   tokenId: Order["tokenId"] | bigint;
   makerAmount: Order["makerAmount"] | bigint;
   takerAmount: Order["takerAmount"] | bigint;
+  /* The current fee rate should be fetched via the `GET /markets` endpoint */
+  feeRateBps: Order["feeRateBps"] | bigint | number;
   nonce?: Order["nonce"] | bigint;
   salt?: Order["salt"] | bigint;
   maker?: Order["maker"];
   taker?: Order["taker"];
   signatureType?: Order["signatureType"];
-  feeRateBps?: Order["feeRateBps"] | bigint | number;
   expiresAt?: Date;
 }
 
@@ -297,7 +294,7 @@ export type TransactionResult = TransactionSuccess | TransactionFail;
 
 export interface CancelOrdersInput {
   orders: SignedOrder[];
-  isMultiOutcome: boolean;
+  isNegRisk: boolean;
 }
 
 export interface CancelOrdersOptions {

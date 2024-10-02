@@ -33,11 +33,11 @@ export class FailedTypedDataEncoderError extends Error {
   }
 }
 
-export class InvalidMultiOutcomeConfig extends Error {
-  public readonly name = "InvalidMultiOutcomeConfig";
+export class InvalidNegRiskConfig extends Error {
+  public readonly name = "InvalidNegRiskConfig";
   constructor() {
     super(
-      "The token ID of one or more orders is not registered in the selected contract. Use `cancelOrder` when `isMultiOutcome` is true. Otherwise, use `cancelNegRiskOrder`.",
+      "The token ID of one or more orders is not registered in the selected contract. Use `cancelOrders` when `isNegRisk` is false. Otherwise, use `cancelNegRiskOrders`.",
     );
   }
 }

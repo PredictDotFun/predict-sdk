@@ -52,6 +52,7 @@ Here's an example of how to use the OrderBuilder to create and sign a `LIMIT` st
 3. **Set Approvals**: Ensure the necessary approvals are set (refer to [Set Approvals](#set-approvals)).
 4. **Determine Order Amounts**: Use `getLimitOrderAmounts` to calculate order amounts.
 5. **Build Order**: Use `buildOrder` to generate a `LIMIT` strategy order.
+   - NOTE: Fetch the `feeRateBps` via the `GET /markets` endpoint on the REST API
 6. **Generate Typed Data**: Call `buildTypedData` to generate typed data for the order.
 7. **Sign Order**: Obtain a `SignedOrder` object by calling `signTypedDataOrder`.
 8. **Compute Order Hash**: Compute the order hash using `buildTypedDataHash`.
@@ -95,10 +96,11 @@ async function main() {
     makerAmount, // 0.4 USDB * 10 shares (in wei)
     takerAmount, // 10 shares (in wei)
     nonce: 0n,
+    feeRateBps: 0, // Should be fetched via the `GET /markets` endpoint
   });
 
-  // Build typed data for the order
-  const typedData = builder.buildTypedData(order, true);
+  // Build typed data for the order (isNegRisk can be fetched via the API)
+  const typedData = builder.buildTypedData(order, { isNegRisk: true });
 
   // Sign the order by providing the typedData of the order
   const signedOrder = await builder.signTypedDataOrder(typedData);
@@ -127,6 +129,7 @@ Similarly to the above, here's the flow to create a `MARKET` sell order:
 4. **Fetch Orderbook**: Query the Predict API for the latest orderbook for the market.
 5. **Determine Order Amounts**: Use `getMarketOrderAmounts` to calculate order amounts.
 6. **Build Order**: Call `buildOrder` to generate a `MARKET` strategy order.
+   - NOTE: Fetch the `feeRateBps` via the `GET /markets` endpoint on the REST API
 7. **Generate Typed Data**: Use `buildTypedData` to create typed data for the order.
 8. **Sign Order**: Obtain a `SignedOrder` object by calling `signTypedDataOrder`.
 9. **Compute Order Hash**: Compute the order hash using `buildTypedDataHash`.
@@ -175,10 +178,11 @@ async function main() {
     makerAmount, // 10 shares (in wei)
     takerAmount, // 0.4 USDB * 10 shares (in wei)
     nonce: 0n,
+    feeRateBps: 0, // Should be fetched via the `GET /markets` endpoint
   });
 
-  // Build typed data for the order
-  const typedData = builder.buildTypedData(order, true);
+  // Build typed data for the order (isNegRisk can be fetched via the API)
+  const typedData = builder.buildTypedData(order, { isNegRisk: false });
 
   // Sign the order by providing the typedData of the order
   const signedOrder = await builder.signTypedDataOrder(typedData);
@@ -279,8 +283,8 @@ const success = receipt.status === 1;
 Here's an example on how to cancel orders via the SDK
 
 1. **Fetch Orders**: Retrieve your open orders using `GET /orders`.
-2. **Group by `isMultiOutcome`**: Separate orders based on the `isMultiOutcome` property.
-3. **Cancel Orders**: Call the specific cancel function based on the order(s) type (`isMultiOutcome`).
+2. **Group by `isNegRisk`**: Separate orders based on the `isNegRisk` property.
+3. **Cancel Orders**: Call the specific cancel function based on the order(s) type (`isNegRisk`).
 4. **Check Transaction Success**: Check to confirm the transaction was successful.
 
 ```ts
@@ -299,24 +303,24 @@ const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
 async function main() {
   // Fetch your open orders from the `GET /orders` endpoint
   const apiResponse = [
-    // There are more fields, but for cancellations we only care about `order` and `isMultiOutcome`
-    { order: {}, isMultiOutcome: true },
-    { order: {}, isMultiOutcome: false },
-    { order: {}, isMultiOutcome: false },
+    // There are more fields, but for cancellations we only care about `order` and `isNegRisk`
+    { order: {}, isNegRisk: true },
+    { order: {}, isNegRisk: false },
+    { order: {}, isNegRisk: false },
   ];
 
   // Determine which orders you want to cancel
   const ordersToCancel = [
-    { order: {}, isMultiOutcome: true },
-    { order: {}, isMultiOutcome: false },
+    { order: {}, isNegRisk: true },
+    { order: {}, isNegRisk: false },
   ];
 
   const regularOrders: Order[] = [];
   const negRiskOrders: Order[] = [];
 
-  // Group the orders by `isMultiOutcome`
-  for (const { order, isMultiOutcome } of ordersToCancel) {
-    if (isMultiOutcome) {
+  // Group the orders by `isNegRisk`
+  for (const { order, isNegRisk } of ordersToCancel) {
+    if (isNegRisk) {
       negRiskOrders.push(order);
     } else {
       regularOrders.push(order);
