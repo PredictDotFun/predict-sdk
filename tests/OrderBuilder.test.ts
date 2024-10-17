@@ -15,7 +15,11 @@ const toWei = (amount: number) => parseEther(amount.toString());
 const generateSalt = () => "1234";
 
 describe("OrderBuilder", () => {
-  const orderBuilder = new OrderBuilder(ChainId.BlastSepolia, mockSigner, { generateSalt });
+  let orderBuilder: OrderBuilder;
+
+  beforeAll(async () => {
+    orderBuilder = await OrderBuilder.make(ChainId.BlastSepolia, mockSigner, { generateSalt });
+  });
 
   describe("getLimitOrderAmounts", () => {
     it("should calculate correct amounts for BUY order", () => {
@@ -197,7 +201,7 @@ describe("OrderBuilder", () => {
     });
 
     it("should throw MissingSignerError if signer is not provided", async () => {
-      const orderBuilderWithoutSigner = new OrderBuilder(ChainId.BlastSepolia);
+      const orderBuilderWithoutSigner = await OrderBuilder.make(ChainId.BlastSepolia);
       const order = orderBuilderWithoutSigner.buildOrder("LIMIT", {
         side: Side.BUY,
         nonce: "1",

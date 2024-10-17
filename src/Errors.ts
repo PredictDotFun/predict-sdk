@@ -41,3 +41,19 @@ export class InvalidNegRiskConfig extends Error {
     );
   }
 }
+
+export class MakerSignerMismatchError extends Error {
+  public readonly name = "MakerSignerMismatchError";
+  constructor() {
+    super("The maker and signer must be the same address.");
+  }
+}
+
+export class InvalidSignerError extends Error {
+  public readonly name = "InvalidSignerError";
+  constructor() {
+    super(
+      "The signer is not the owner of the Predict account or you are on the wrong chain. The signer must be the Privy wallet exported from your account's settings. See: https://predict.fun/account/settings",
+    );
+  }
+}

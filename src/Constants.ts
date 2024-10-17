@@ -1,4 +1,5 @@
 import type { Addresses } from "./Types";
+import type { TypedDataDomain } from "ethers";
 import { JsonRpcProvider } from "ethers";
 
 export const MAX_SALT = 2_147_483_648;
@@ -23,6 +24,11 @@ export enum Side {
   SELL = 1,
 }
 
+export const KernelDomainByChainId = {
+  [ChainId.BlastMainnet]: { name: "Kernel", version: "0.3.1", chainId: ChainId.BlastMainnet },
+  [ChainId.BlastSepolia]: { name: "Kernel", version: "0.3.1", chainId: ChainId.BlastSepolia },
+} satisfies Record<ChainId, TypedDataDomain>;
+
 export const AddressesByChainId = {
   [ChainId.BlastMainnet]: {
     CTF_EXCHANGE: "0x739f0331594029064C252559436eDce0E468E37a",
@@ -30,6 +36,8 @@ export const AddressesByChainId = {
     NEG_RISK_ADAPTER: "0xc55687812285D05b74815EE2716D046fAF61B003",
     CONDITIONAL_TOKENS: "0x8F9C9f888A4268Ab0E2DDa03A291769479bAc285",
     USDB: "0x4300000000000000000000000000000000000003",
+    KERNEL: "0xBAC849bB641841b44E965fB01A4Bf5F074f84b4D",
+    ECDSA_VALIDATOR: "0x845ADb2C711129d4f3966735eD98a9F09fC4cE57",
   },
   [ChainId.BlastSepolia]: {
     CTF_EXCHANGE: "0xba9605D6d0108ed3787fD9423F6d28BF8c7dE2DD",
@@ -37,6 +45,8 @@ export const AddressesByChainId = {
     NEG_RISK_ADAPTER: "0xd21Ce3f6A0e9351bF47b9045200410f55F74f9CC",
     CONDITIONAL_TOKENS: "0xD6EBc6E01a282A3803920DE31227D8a6687e2F8F",
     USDB: "0x4200000000000000000000000000000000000022",
+    KERNEL: "0xBAC849bB641841b44E965fB01A4Bf5F074f84b4D",
+    ECDSA_VALIDATOR: "0x845ADb2C711129d4f3966735eD98a9F09fC4cE57",
   },
 } satisfies Record<ChainId, Addresses>;
 

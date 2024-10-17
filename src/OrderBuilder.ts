@@ -18,6 +18,7 @@ import type {
   TransactionResult,
   CancelOrdersOptions,
   SetApprovalsResult,
+  Address,
 } from "./Types";
 import type { AbstractProvider, BaseWallet, BigNumberish } from "ethers";
 import type { ChainId } from "./Constants";
@@ -26,18 +27,33 @@ import type {
   BlastCTFExchange,
   BlastNegRiskAdapter,
   BlastNegRiskCtfExchange,
+  ECDSAValidator,
   ERC20,
+  Kernel,
 } from "./typechain";
 import type { OrderStruct } from "./typechain/BlastCTFExchange";
 import type { ContractFunction, Optional } from "./internal/Types";
-import { BaseContract, MaxInt256, MaxUint256, parseEther, TypedDataEncoder, ZeroAddress } from "ethers";
+import {
+  concat,
+  hashMessage,
+  MaxInt256,
+  MaxUint256,
+  parseEther,
+  toBeHex,
+  TypedDataEncoder,
+  ZeroAddress,
+  ZeroHash,
+} from "ethers";
 import { MulticallWrapper } from "ethers-multicall-provider";
+import { makeContract, eip712WrapHash } from "./internal/Utils";
 import {
   FailedOrderSignError,
   FailedTypedDataEncoderError,
   InvalidExpirationError,
   InvalidNegRiskConfig,
   InvalidQuantityError,
+  InvalidSignerError,
+  MakerSignerMismatchError,
   MissingSignerError,
 } from "./Errors";
 import {
@@ -48,6 +64,7 @@ import {
   PROTOCOL_VERSION,
   SignatureType,
   AddressesByChainId,
+  KernelDomainByChainId,
   MAX_SALT,
   FIVE_MINUTES_SECONDS,
   ProviderByChainId,
@@ -57,15 +74,22 @@ import {
   BlastCTFExchangeAbi,
   BlastNegRiskAdapterAbi,
   BlastNegRiskCtfExchangeAbi,
+  ECDSAValidatorAbi,
   ERC20Abi,
+  KernelAbi,
 } from "./abis";
 
 /**
  * @remarks The precision represents the number of decimals supported. By default, it's set to 18 (for wei).
+ * @remarks When defining a `predictAccount` address the `OrderBuilder` signer must be the Privy exported wallet, from the account's settings.
  */
 interface OrderBuilderOptions {
   addresses?: Addresses;
   precision?: number;
+  /**
+   * When defining a `predictAccount` address the `OrderBuilder` signer must be the Privy exported wallet, from the account's settings.
+   */
+  predictAccount?: Address;
   generateSalt?: () => string;
 }
 
@@ -80,58 +104,90 @@ export const generateOrderSalt = (): string => {
 
 /**
  * Helper class to build orders.
+ *
+ * To create a new instance of the `OrderBuilder` class, call the async `make` method.
  */
 export class OrderBuilder {
-  private precision: bigint;
-  private addresses: Addresses;
-  private contracts: MulticallContracts | undefined;
-  private generateOrderSalt: () => string;
+  private readonly executionMode = ZeroHash;
 
   /**
-   * Constructor for the OrderBuilder class.
+   * Initializes a new instance of the OrderBuilder class.
+   *
+   * @async
    * @param {ChainId} chainId - The chain ID for the network.
    * @param {BaseWallet} [signer] - Optional signer object for signing orders.
    * @param {OrderBuilderOptions} [options] - Optional order configuration options; default values are specific for Predict.
    */
-  constructor(
-    private readonly chainId: ChainId,
-    private readonly signer?: BaseWallet,
-    private readonly options?: OrderBuilderOptions,
-  ) {
-    this.addresses = options?.addresses ?? AddressesByChainId[chainId];
-    this.generateOrderSalt = options?.generateSalt ?? generateOrderSalt;
-    this.precision = options?.precision ? 10n ** BigInt(options.precision) : BigInt(1e18);
+  static async make(chainId: ChainId, signer?: BaseWallet, options?: OrderBuilderOptions): Promise<OrderBuilder> {
+    let contracts: MulticallContracts | undefined = undefined;
+    const addresses = options?.addresses ?? AddressesByChainId[chainId];
+    const generateSalt = options?.generateSalt ?? generateOrderSalt;
+    const precision = options?.precision ? 10n ** BigInt(options.precision) : BigInt(1e18);
+    const predictAccount = options?.predictAccount;
 
-    if (this.signer) {
-      const provider = this.signer.provider ?? ProviderByChainId[chainId];
+    if (signer) {
+      const provider = signer.provider ?? ProviderByChainId[chainId];
       const multicallProvider = MulticallWrapper.wrap(provider as AbstractProvider);
 
-      if (!this.signer.provider) {
-        this.signer = this.signer.connect(provider);
+      if (!signer.provider) {
+        signer = signer.connect(provider);
       }
 
-      const ctfExchange = new BaseContract(this.addresses.CTF_EXCHANGE, BlastCTFExchangeAbi);
-      const negRiskCtfExchange = new BaseContract(this.addresses.NEG_RISK_CTF_EXCHANGE, BlastNegRiskCtfExchangeAbi);
-      const negRiskAdapter = new BaseContract(this.addresses.NEG_RISK_ADAPTER, BlastNegRiskAdapterAbi);
-      const conditionalTokens = new BaseContract(this.addresses.CONDITIONAL_TOKENS, BlastConditionalTokensAbi);
-      const usdb = new BaseContract(this.addresses.USDB, ERC20Abi);
+      const ctfExchange = makeContract<BlastCTFExchange>(addresses.CTF_EXCHANGE, BlastCTFExchangeAbi);
+      const negRiskAdapter = makeContract<BlastNegRiskAdapter>(addresses.NEG_RISK_ADAPTER, BlastNegRiskAdapterAbi);
+      const usdb = makeContract<ERC20>(addresses.USDB, ERC20Abi);
+      const kernel = makeContract<Kernel>(predictAccount ?? addresses.KERNEL, KernelAbi);
+      const validator = makeContract<ECDSAValidator>(addresses.ECDSA_VALIDATOR, ECDSAValidatorAbi);
+      const conditionalTokens = makeContract<BlastConditionalTokens>(
+        addresses.CONDITIONAL_TOKENS,
+        BlastConditionalTokensAbi,
+      );
+      const negRiskCtfExchange = makeContract<BlastNegRiskCtfExchange>(
+        addresses.NEG_RISK_CTF_EXCHANGE,
+        BlastNegRiskCtfExchangeAbi,
+      );
 
-      this.contracts = {
-        CTF_EXCHANGE: ctfExchange.connect(this.signer) as BlastCTFExchange,
-        NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange.connect(this.signer) as BlastNegRiskCtfExchange,
-        NEG_RISK_ADAPTER: negRiskAdapter.connect(this.signer) as BlastNegRiskAdapter,
-        CONDITIONAL_TOKENS: conditionalTokens.connect(this.signer) as BlastConditionalTokens,
-        USDB: usdb.connect(this.signer) as ERC20,
+      contracts = {
+        CTF_EXCHANGE: ctfExchange(signer),
+        NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange(signer),
+        NEG_RISK_ADAPTER: negRiskAdapter(signer),
+        CONDITIONAL_TOKENS: conditionalTokens(signer),
+        USDB: usdb(signer),
+        KERNEL: kernel(signer),
+        ECDSA_VALIDATOR: validator(signer),
         multicall: {
-          CTF_EXCHANGE: ctfExchange.connect(multicallProvider) as BlastCTFExchange,
-          NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange.connect(multicallProvider) as BlastNegRiskCtfExchange,
-          NEG_RISK_ADAPTER: negRiskAdapter.connect(multicallProvider) as BlastNegRiskAdapter,
-          CONDITIONAL_TOKENS: conditionalTokens.connect(multicallProvider) as BlastConditionalTokens,
-          USDB: usdb.connect(multicallProvider) as ERC20,
+          CTF_EXCHANGE: ctfExchange(multicallProvider),
+          NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange(multicallProvider),
+          NEG_RISK_ADAPTER: negRiskAdapter(multicallProvider),
+          CONDITIONAL_TOKENS: conditionalTokens(multicallProvider),
+          USDB: usdb(multicallProvider),
+          KERNEL: kernel(multicallProvider),
+          ECDSA_VALIDATOR: validator(multicallProvider),
         },
       };
+
+      if (predictAccount) {
+        const contract = contracts.ECDSA_VALIDATOR.contract;
+        const owner = await contract.ecdsaValidatorStorage(predictAccount);
+
+        if (owner !== signer.address) {
+          throw new InvalidSignerError();
+        }
+      }
     }
+
+    return new OrderBuilder(chainId, precision, addresses, generateSalt, signer, contracts, predictAccount);
   }
+
+  constructor(
+    private readonly chainId: ChainId,
+    private readonly precision: bigint,
+    private readonly addresses: Addresses,
+    private readonly generateOrderSalt: () => string,
+    private readonly signer?: BaseWallet,
+    private readonly contracts?: MulticallContracts,
+    private readonly predictAccount?: Address,
+  ) {}
 
   /**
    * Helper function to handle transactions safely.
@@ -165,6 +221,19 @@ export class OrderBuilder {
     }
   }
 
+  /**
+   * Helper function to encode the calldata for the `execute` function.
+   *
+   * @private
+   * @param {string} to - The address of the contract to execute the calldata on.
+   * @param {string} calldata - The calldata to execute.
+   * @param {bigint} [value] - The value to send with the calldata. Defaults to 0.
+   * @returns {string} The encoded calldata.
+   */
+  private encodeExecutionCalldata(to: string, calldata: string, value: bigint = 0n): string {
+    return concat([to, toBeHex(value, 32), calldata]);
+  }
+
   private getApprovalOps(key: keyof Addresses, type: "ERC1155"): Erc1155Approval;
   private getApprovalOps(key: keyof Addresses, type: "ERC20"): Erc20Approval;
 
@@ -185,23 +254,56 @@ export class OrderBuilder {
       throw new MissingSignerError();
     }
 
-    switch (type) {
-      case "ERC1155": {
-        const contract = this.contracts.CONDITIONAL_TOKENS;
+    if (this.predictAccount) {
+      const kernel = this.contracts.KERNEL.contract;
 
-        return {
-          isApprovedForAll: () => contract.isApprovedForAll(this.signer!.address, address),
-          setApprovalForAll: (approved: boolean = true) =>
-            this.handleTransaction(contract.setApprovalForAll, address, approved),
-        };
+      switch (type) {
+        case "ERC1155": {
+          const { contract, codec } = this.contracts.CONDITIONAL_TOKENS;
+
+          return {
+            isApprovedForAll: () => contract.isApprovedForAll(this.predictAccount!, address),
+            setApprovalForAll: (approved: boolean = true) => {
+              const encoded = codec.encodeFunctionData("setApprovalForAll", [address, approved]);
+              const calldata = this.encodeExecutionCalldata(this.addresses.CONDITIONAL_TOKENS, encoded);
+
+              return this.handleTransaction(kernel.execute, this.executionMode, calldata);
+            },
+          };
+        }
+        case "ERC20": {
+          const { contract, codec } = this.contracts.USDB;
+
+          return {
+            allowance: () => contract.allowance(this.predictAccount!, address),
+            approve: (amount: bigint = MaxUint256) => {
+              const encoded = codec.encodeFunctionData("approve", [address, amount]);
+              const calldata = this.encodeExecutionCalldata(this.addresses.USDB, encoded);
+
+              return this.handleTransaction(kernel.execute, this.executionMode, calldata);
+            },
+          };
+        }
       }
-      case "ERC20": {
-        const contract = this.contracts.USDB;
+    } else {
+      switch (type) {
+        case "ERC1155": {
+          const contract = this.contracts.CONDITIONAL_TOKENS.contract;
 
-        return {
-          allowance: () => contract.allowance(this.signer!.address, address),
-          approve: (amount: bigint = MaxUint256) => this.handleTransaction(contract.approve, address, amount),
-        };
+          return {
+            isApprovedForAll: () => contract.isApprovedForAll(this.signer!.address, address),
+            setApprovalForAll: (approved: boolean = true) =>
+              this.handleTransaction(contract.setApprovalForAll, address, approved),
+          };
+        }
+        case "ERC20": {
+          const contract = this.contracts.USDB.contract;
+
+          return {
+            allowance: () => contract.allowance(this.signer!.address, address),
+            approve: (amount: bigint = MaxUint256) => this.handleTransaction(contract.approve, address, amount),
+          };
+        }
       }
     }
   }
@@ -238,6 +340,33 @@ export class OrderBuilder {
             lastPriceWei: priceWei,
           };
     }, reduceInit);
+  }
+
+  /**
+   * Helper function to sign a message for a Predict account.
+   *
+   * @private
+   * @async
+   * @param {string} message - The message to sign.
+   * @returns {Promise<string>} The signed message.
+   *
+   * @throws {MissingSignerError} If a `signer` or `predictAccount` was not provided when instantiating the `OrderBuilder`.
+   */
+  async signPredictAccountMessage(message: string | { raw: string }): Promise<string> {
+    if (!this.signer || !this.predictAccount) {
+      throw new MissingSignerError();
+    }
+
+    const validatorAddress = this.addresses.ECDSA_VALIDATOR;
+    const kernelDomain = KernelDomainByChainId[this.chainId];
+
+    const messageHash = typeof message === "string" ? hashMessage(message) : message.raw;
+    const digest = eip712WrapHash(messageHash, { ...kernelDomain, verifyingContract: this.predictAccount });
+
+    const messageBuffer = Buffer.from(digest.slice(2), "hex");
+    const signedMessage = await this.signer!.signMessage(messageBuffer);
+
+    return concat([concat(["0x01", validatorAddress]), signedMessage]);
   }
 
   /**
@@ -331,6 +460,10 @@ export class OrderBuilder {
     const limitExpiration = Math.floor(expiresAt.getTime() / 1000);
     const marketExpiration = Math.floor(Date.now() / 1000 + FIVE_MINUTES_SECONDS);
 
+    if (this.predictAccount && (data?.maker || data?.signer)) {
+      console.warn("[WARN]: When using a Predict account the maker and signer are ignored.");
+    }
+
     if (strategy === "MARKET" && data.expiresAt) {
       console.warn("[WARN]: expiresAt for market orders is ignored.");
     }
@@ -339,10 +472,15 @@ export class OrderBuilder {
       throw new InvalidExpirationError();
     }
 
+    const signer = data?.signer ?? this.signer!.address;
+    if (data?.maker && signer !== data.maker) {
+      throw new MakerSignerMismatchError();
+    }
+
     return {
       salt: String(data.salt ?? this.generateOrderSalt()),
-      maker: data?.maker ?? data.signer,
-      signer: data.signer,
+      maker: this.predictAccount ?? data?.maker ?? signer,
+      signer: this.predictAccount ?? signer,
       taker: data.taker ?? ZeroAddress,
       tokenId: String(data.tokenId),
       makerAmount: String(data.makerAmount),
@@ -388,7 +526,8 @@ export class OrderBuilder {
    * @remarks The param `isNegRisk` can be found via the `GET /markets` endpoint.
    *
    * @async
-   * @param {EIP712TypedData} typedData - The typed data for the order to sign.
+   * @param {Order} order - The order to sign.
+   * @param {boolean} isNegRisk - Whether the order is for a multi-outcome market.
    * @returns {Promise<SignedOrder>} The signed order.
    *
    * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
@@ -403,9 +542,16 @@ export class OrderBuilder {
     const { EIP712Domain: _, ...typedDataTypes } = typedData.types;
 
     try {
-      const signature = await this.signer.signTypedData(typedData.domain, typedDataTypes, typedData.message);
+      if (this.predictAccount) {
+        const hash = this.buildTypedDataHash(typedData);
+        const signature = await this.signPredictAccountMessage({ raw: hash });
 
-      return { ...order, signature };
+        return { ...order, signature };
+      } else {
+        const signature = await this.signer.signTypedData(typedData.domain, typedDataTypes, typedData.message);
+
+        return { ...order, signature };
+      }
     } catch (error) {
       throw new FailedOrderSignError(error as Error);
     }
@@ -568,29 +714,6 @@ export class OrderBuilder {
   }
 
   /**
-   * Cancels orders for the CTF Exchange or Neg Risk CTF Exchange.
-   *
-   * @private
-   * @async
-   * @param {BlastCTFExchange["cancelOrders"]} cancelOrders - The function to cancel the orders.
-   * @param {Order[]} orders - The orders to cancel.
-   * @returns {Promise<TransactionResult>} The result of the cancellation.
-   *
-   * @throws {MissingSignerError} If a `signer` was not provided when instantiating the `OrderBuilder`.
-   */
-  private async _cancelOrders(
-    cancelOrders: BlastCTFExchange["cancelOrders"],
-    orders: Order[],
-  ): Promise<TransactionResult> {
-    const orderStructs = orders as OrderStruct[];
-    if (orderStructs.length === 0) {
-      return { success: true };
-    }
-
-    return this.handleTransaction(cancelOrders, orderStructs);
-  }
-
-  /**
    * Validates the token IDs against the CTF Exchange or Neg Risk CTF Exchange based on the `isNegRisk` flag.
    *
    * @async
@@ -608,8 +731,8 @@ export class OrderBuilder {
     const multicall = this.contracts.multicall;
     const validations = tokenIds.map((tokenId) =>
       isNegRisk
-        ? multicall.NEG_RISK_CTF_EXCHANGE.validateTokenId(tokenId)
-        : multicall.CTF_EXCHANGE.validateTokenId(tokenId),
+        ? multicall.NEG_RISK_CTF_EXCHANGE.contract.validateTokenId(tokenId)
+        : multicall.CTF_EXCHANGE.contract.validateTokenId(tokenId),
     );
 
     const results = await Promise.allSettled(validations);
@@ -628,12 +751,17 @@ export class OrderBuilder {
    * @throws {InvalidNegRiskConfig} If the token IDs are invalid for the CTF Exchange.
    */
   async cancelOrders(orders: Order[], options?: CancelOrdersOptions): Promise<TransactionResult> {
+    const orderStructs = orders as OrderStruct[];
+    if (orderStructs.length === 0) {
+      return { success: true };
+    }
+
     if (!this.contracts) {
       throw new MissingSignerError();
     }
 
     if (options?.withValidation ?? true) {
-      const tokenIds = orders.map((order) => order.tokenId);
+      const tokenIds = orderStructs.map((order) => order.tokenId);
       const isValid = await this.validateTokenIds(tokenIds, false);
 
       if (!isValid) {
@@ -641,8 +769,16 @@ export class OrderBuilder {
       }
     }
 
-    const cancelOrders = this.contracts.CTF_EXCHANGE.cancelOrders;
-    return this._cancelOrders(cancelOrders, orders);
+    const { contract, codec } = this.contracts.CTF_EXCHANGE;
+    if (this.predictAccount) {
+      const kernel = this.contracts.KERNEL.contract;
+      const encoded = codec.encodeFunctionData("cancelOrders", [orderStructs]);
+      const calldata = this.encodeExecutionCalldata(this.addresses.CTF_EXCHANGE, encoded);
+
+      return this.handleTransaction(kernel.execute, this.executionMode, calldata);
+    } else {
+      return this.handleTransaction(contract.cancelOrders, orderStructs);
+    }
   }
 
   /**
@@ -657,12 +793,17 @@ export class OrderBuilder {
    * @throws {InvalidNegRiskConfig} If the token IDs are invalid for the Neg Risk CTF Exchange.
    */
   async cancelNegRiskOrders(orders: Order[], options?: CancelOrdersOptions): Promise<TransactionResult> {
+    const orderStructs = orders as OrderStruct[];
+    if (orderStructs.length === 0) {
+      return { success: true };
+    }
+
     if (!this.contracts) {
       throw new MissingSignerError();
     }
 
     if (options?.withValidation ?? true) {
-      const tokenIds = orders.map((order) => order.tokenId);
+      const tokenIds = orderStructs.map((order) => order.tokenId);
       const isValid = await this.validateTokenIds(tokenIds, true);
 
       if (!isValid) {
@@ -670,7 +811,15 @@ export class OrderBuilder {
       }
     }
 
-    const cancelOrders = this.contracts.NEG_RISK_CTF_EXCHANGE.cancelOrders;
-    return this._cancelOrders(cancelOrders, orders);
+    const { contract, codec } = this.contracts.NEG_RISK_CTF_EXCHANGE;
+    if (this.predictAccount) {
+      const kernel = this.contracts.KERNEL.contract;
+      const encoded = codec.encodeFunctionData("cancelOrders", [orderStructs]);
+      const calldata = this.encodeExecutionCalldata(this.addresses.NEG_RISK_CTF_EXCHANGE, encoded);
+
+      return this.handleTransaction(kernel.execute, this.executionMode, calldata);
+    } else {
+      return this.handleTransaction(contract.cancelOrders, orderStructs);
+    }
   }
 }
