@@ -4,11 +4,14 @@ import type {
   BlastCTFExchange,
   BlastNegRiskAdapter,
   BlastNegRiskCtfExchange,
+  ECDSAValidator,
   ERC20,
+  Kernel,
 } from "./typechain";
-import type { ContractTransactionReceipt } from "ethers";
+import type { ContractTransactionReceipt, Interface } from "ethers";
 
 export type BigIntString = string;
+export type Address = string;
 
 export type Currency = "USDB";
 export type OrderStrategy = "MARKET" | "LIMIT";
@@ -47,11 +50,13 @@ export interface OrderAmounts {
  */
 
 export interface Addresses {
-  CTF_EXCHANGE: string;
-  NEG_RISK_CTF_EXCHANGE: string;
-  NEG_RISK_ADAPTER: string;
-  CONDITIONAL_TOKENS: string;
-  USDB: string;
+  CTF_EXCHANGE: Address;
+  NEG_RISK_CTF_EXCHANGE: Address;
+  NEG_RISK_ADAPTER: Address;
+  CONDITIONAL_TOKENS: Address;
+  USDB: Address;
+  KERNEL: Address;
+  ECDSA_VALIDATOR: Address;
 }
 
 /**
@@ -147,12 +152,12 @@ export interface SignedOrder extends Order {
 
 export interface BuildOrderInput {
   side: Order["side"];
-  signer: Order["signer"];
   tokenId: Order["tokenId"] | bigint;
   makerAmount: Order["makerAmount"] | bigint;
   takerAmount: Order["takerAmount"] | bigint;
   /* The current fee rate should be fetched via the `GET /markets` endpoint */
   feeRateBps: Order["feeRateBps"] | bigint | number;
+  signer?: Order["signer"];
   nonce?: Order["nonce"] | bigint;
   salt?: Order["salt"] | bigint;
   maker?: Order["maker"];
@@ -205,11 +210,13 @@ export interface Book {
  */
 
 export interface Contracts {
-  CTF_EXCHANGE: BlastCTFExchange;
-  NEG_RISK_CTF_EXCHANGE: BlastNegRiskCtfExchange;
-  NEG_RISK_ADAPTER: BlastNegRiskAdapter;
-  CONDITIONAL_TOKENS: BlastConditionalTokens;
-  USDB: ERC20;
+  CTF_EXCHANGE: { contract: BlastCTFExchange; codec: Interface };
+  NEG_RISK_CTF_EXCHANGE: { contract: BlastNegRiskCtfExchange; codec: Interface };
+  NEG_RISK_ADAPTER: { contract: BlastNegRiskAdapter; codec: Interface };
+  CONDITIONAL_TOKENS: { contract: BlastConditionalTokens; codec: Interface };
+  USDB: { contract: ERC20; codec: Interface };
+  KERNEL: { contract: Kernel; codec: Interface };
+  ECDSA_VALIDATOR: { contract: ECDSAValidator; codec: Interface };
 }
 
 export interface MulticallContracts extends Contracts {

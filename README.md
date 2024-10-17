@@ -29,10 +29,28 @@ import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 // Create a wallet to sent the approvals transactions (must be the orders' `maker`)
 const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
 
-// Create a new instance of the OrderBuilder class
-const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
-
+// The main function which initiates the OrderBuilder (only once per signer) and then provides it as dependency to other util functions
 async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  /**
+   * NOTE: To use your predict account, export the Privy wallet from the account settings at https://predict.fun/account/settings
+   *
+   * You will need to deposit ETH on that address (the Privy wallet) to set approvals and cancel orders.
+   *
+   * Then initiate the `OrderBuilder` as such:
+   *
+   * const builder = await OrderBuilder.make(ChainId.BlastMainnet, privyWallet, { predictAccount: "PREDICT_ACCOUNT_ADDRESS" });
+   *
+   * Replacing `PREDICT_ACCOUNT_ADDRESS` with your Predict account address/deposit address.
+   */
+
+  // Call an helper function to set the approvals and provide the OrderBuilder instance.
+  await setApprovals(builder);
+}
+
+async function setApprovals(builder: OrderBuilder) {
   // Set all the approval needed within the protocol
   const result = await builder.setApprovals();
 
@@ -43,12 +61,70 @@ async function main() {
 }
 ```
 
+## How to use a Predict account
+
+Here's an example of how to use a Predict account to create/cancel orders and set approvals.
+
+1. **Initiate the Privy Wallet**: The wallet is needed to sign orders. Can be found in the [account settings](https://predict.fun/account/settings).
+2. **Ensure the Privy Wallet has funds**: You will need to add some ETH to be able to set approvals and cancel orders, if needed.
+3. **Initialize `OrderBuilder`**: Instantiate the `OrderBuilder` class by calling `OrderBuilder.make`.
+   - NOTE: Include the `predictAccount` address, which is also known as the deposit address.
+4. **Set Approvals**: Ensure the necessary approvals are set (refer to [Set Approvals](#set-approvals)).
+5. **Determine Order Amounts**: Use `getLimitOrderAmounts` to calculate order amounts.
+6. **Build Order**: Use `buildOrder` to generate a `LIMIT` strategy order.
+   - NOTE: Fetch the `feeRateBps` via the `GET /markets` endpoint on the REST API
+   - NOTE: Set the `signer` and `maker` to the `predictAccount` address, **NOT** the signer/privy wallet address.
+7. **Generate Typed Data**: Call `buildTypedData` to generate typed data for the order.
+8. **Sign Order**: Obtain a `SignedOrder` object by calling `signTypedDataOrder`.
+9. **Compute Order Hash**: Compute the order hash using `buildTypedDataHash`.
+
+```ts
+import { Wallet } from "ethers";
+import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
+
+// Export and fund with ETH the Privy wallet from the account settings at https://predict.fun/account/settings
+const privyWallet = new Wallet(process.env.PRIVY_WALLET_PRIVATE_KEY);
+
+// The main function which initiates the OrderBuilder (only once per signer) and then provides it as dependency to other util functions
+async function main() {
+  /**
+   * NOTE: Replace `PREDICT_ACCOUNT_ADDRESS` with your Predict account address/deposit address.
+   */
+
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, privyWallet, {
+    predictAccount: "PREDICT_ACCOUNT_ADDRESS",
+  });
+
+  // Call an helper function to create the order and provide the OrderBuilder instance
+  await createOrder(builder);
+}
+
+async function createOrder(builder: OrderBuilder) {
+  // Step 1. Set approvals and define the order params as usual
+
+  // Step 2. Create the order by using the Predict account address as both the `signer` and `maker`
+  const order = builder.buildOrder("LIMIT", {
+    maker: "PREDICT_ACCOUNT_ADDRESS",
+    signer: "PREDICT_ACCOUNT_ADDRESS",
+    side: Side.BUY, // Equivalent to 0
+    tokenId: "OUTCOME_ON_CHAIN_ID", // This can be fetched via the API or on-chain
+    makerAmount, // 0.4 USDB * 10 shares (in wei)
+    takerAmount, // 10 shares (in wei)
+    nonce: 0n,
+    feeRateBps: 0, // Should be fetched via the `GET /markets` endpoint
+  });
+
+  // Step 3. Sign and submit the order as usual
+}
+```
+
 ## Limit Orders
 
 Here's an example of how to use the OrderBuilder to create and sign a `LIMIT` strategy buy order:
 
 1. **Create Wallet**: The wallet is needed to sign orders.
-2. **Initialize `OrderBuilder`**: Instantiate the `OrderBuilder` class.
+2. **Initialize `OrderBuilder`**: Instantiate the `OrderBuilder` class by calling `OrderBuilder.make`.
 3. **Set Approvals**: Ensure the necessary approvals are set (refer to [Set Approvals](#set-approvals)).
 4. **Determine Order Amounts**: Use `getLimitOrderAmounts` to calculate order amounts.
 5. **Build Order**: Use `buildOrder` to generate a `LIMIT` strategy order.
@@ -64,10 +140,28 @@ import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 // Create a wallet for signing orders
 const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
 
-// Create a new instance of the OrderBuilder class
-const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
-
+// The main function which initiates the OrderBuilder (only once per signer) and then provides it as dependency to other util functions
 async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  /**
+   * NOTE: To use your predict account, export the Privy wallet from the account settings at https://predict.fun/account/settings
+   *
+   * You will need to deposit ETH on that address (the Privy wallet) to set approvals and cancel orders.
+   *
+   * Then initiate the `OrderBuilder` as such:
+   *
+   * const builder = await OrderBuilder.make(ChainId.BlastMainnet, privyWallet, { predictAccount: "PREDICT_ACCOUNT_ADDRESS" });
+   *
+   * Replacing `PREDICT_ACCOUNT_ADDRESS` with your Predict account address/deposit address.
+   */
+
+  // Call an helper function to create the order and provide the OrderBuilder instance
+  await createOrder(builder);
+}
+
+async function createOrder(builder: OrderBuilder) {
   /**
    * NOTE: You can also call `setApprovals` once per wallet.
    */
@@ -87,10 +181,13 @@ async function main() {
     quantityWei: 10000000000000000000n, // 10 shares (in wei)
   });
 
+  // TODO: If you are using your Predict account (deposit address) use that address, otherwise use the signer address
+  const predictAccountOrSigner = "PREDICT_ACCOUNT_ADDRESS" || signer.address;
+
   // Build a limit order
   const order = builder.buildOrder("LIMIT", {
-    maker: signer.address,
-    signer: signer.address,
+    maker: predictAccountOrSigner,
+    signer: predictAccountOrSigner,
     side: Side.BUY, // Equivalent to 0
     tokenId: "OUTCOME_ON_CHAIN_ID", // This can be fetched via the API or on-chain
     makerAmount, // 0.4 USDB * 10 shares (in wei)
@@ -124,7 +221,7 @@ async function main() {
 Similarly to the above, here's the flow to create a `MARKET` sell order:
 
 1. **Create Wallet**: The wallet is needed to sign orders.
-2. **Initialize `OrderBuilder`**: Instantiate the `OrderBuilder` class.
+2. **Initialize `OrderBuilder`**: Instantiate the `OrderBuilder` class by calling `OrderBuilder.make`.
 3. **Set Approvals**: Ensure the necessary approvals are set (refer to [Set Approvals](#set-approvals)).
 4. **Fetch Orderbook**: Query the Predict API for the latest orderbook for the market.
 5. **Determine Order Amounts**: Use `getMarketOrderAmounts` to calculate order amounts.
@@ -141,10 +238,28 @@ import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 // Create a wallet for signing orders
 const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
 
-// Create a new instance of the OrderBuilder class
-const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
-
+// The main function which initiates the OrderBuilder (only once per signer) and then provides it as dependency to other util functions
 async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  /**
+   * NOTE: To use your predict account, export the Privy wallet from the account settings at https://predict.fun/account/settings
+   *
+   * You will need to deposit ETH on that address (the Privy wallet) to set approvals and cancel orders.
+   *
+   * Then initiate the `OrderBuilder` as such:
+   *
+   * const builder = await OrderBuilder.make(ChainId.BlastMainnet, privyWallet, { predictAccount: "PREDICT_ACCOUNT_ADDRESS" });
+   *
+   * Replacing `PREDICT_ACCOUNT_ADDRESS` with your Predict account address/deposit address.
+   */
+
+  // Call an helper function to create the order and provide the OrderBuilder instance
+  await createOrder(builder);
+}
+
+async function createOrder(builder: OrderBuilder) {
   // Fetch the orderbook for the specific market via `GET orderbook/{marketId}`
   const book = {};
 
@@ -169,10 +284,13 @@ async function main() {
     book, // It's recommended to re-fetch the orderbook regularly to avoid issues
   );
 
+  // TODO: If you are using your Predict account (deposit address) use that address, otherwise use the signer address.
+  const predictAccountOrSigner = "PREDICT_ACCOUNT_ADDRESS" || signer.address;
+
   // Build a limit order
   const order = builder.buildOrder("MARKET", {
-    maker: signer.address,
-    signer: signer.address,
+    maker: predictAccountOrSigner,
+    signer: predictAccountOrSigner,
     side: Side.SELL, // Equivalent to 1
     tokenId: "OUTCOME_ON_CHAIN_ID", // This can be fetched via the API or on-chain
     makerAmount, // 10 shares (in wei)
@@ -263,7 +381,7 @@ const success = receipt.status === 1;
  */
 
 // Create a new instance of the OrderBuilder class
-const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
+const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
 
 // Call one of the util functions, for e.g. `ctfExchangeAllowance`
 const { allowance, approve } = await builder.ctfExchangeAllowance();
@@ -297,10 +415,28 @@ const provider = new JsonRpcProvider(process.env.RPC_PROVIDER_URL);
 // Create a wallet to send the cancel transactions on-chain
 const signer = new Wallet(process.env.WALLET_PRIVATE_KEY).connect(provider);
 
-// Create a new instance of the OrderBuilder class
-const builder = new OrderBuilder(ChainId.BlastMainnet, signer);
-
+// The main function which initiates the OrderBuilder (only once per signer) and then provides it as dependency to other util functions
 async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  /**
+   * NOTE: To use your predict account, export the Privy wallet from the account settings at https://predict.fun/account/settings
+   *
+   * You will need to deposit ETH on that address (the Privy wallet) to set approvals and cancel orders.
+   *
+   * Then initiate the `OrderBuilder` as such:
+   *
+   * const builder = await OrderBuilder.make(ChainId.BlastMainnet, privyWallet, { predictAccount: "PREDICT_ACCOUNT_ADDRESS" });
+   *
+   * Replacing `PREDICT_ACCOUNT_ADDRESS` with your Predict account address/deposit address.
+   */
+
+  // Call an helper function to cancel orders and provide the OrderBuilder instance
+  await createOrder(builder);
+}
+
+async function cancelOrders(builder: OrderBuilder) {
   // Fetch your open orders from the `GET /orders` endpoint
   const apiResponse = [
     // There are more fields, but for cancellations we only care about `order` and `isNegRisk`
