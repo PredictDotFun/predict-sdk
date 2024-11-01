@@ -343,6 +343,17 @@ export class OrderBuilder {
   }
 
   /**
+   * Rounds down a BigInt number to the nearest multiple.
+   *
+   * @param num - The BigInt number to round.
+   * @param multiple - The BigInt nearest multiple.
+   * @returns The rounded BigInt number.
+   */
+  private roundDownToNearest(num: bigint, multiple: bigint = 10n ** 13n): bigint {
+    return num - (num % multiple);
+  }
+
+  /**
    * Helper function to sign a message for a Predict account.
    *
    * @private
@@ -386,7 +397,7 @@ export class OrderBuilder {
       case Side.BUY: {
         return {
           pricePerShare: data.pricePerShareWei,
-          makerAmount: (data.pricePerShareWei * data.quantityWei) / this.precision,
+          makerAmount: this.roundDownToNearest((data.pricePerShareWei * data.quantityWei) / this.precision),
           takerAmount: data.quantityWei,
         };
       }
@@ -394,7 +405,7 @@ export class OrderBuilder {
         return {
           pricePerShare: data.pricePerShareWei,
           makerAmount: data.quantityWei,
-          takerAmount: (data.pricePerShareWei * data.quantityWei) / this.precision,
+          takerAmount: this.roundDownToNearest((data.pricePerShareWei * data.quantityWei) / this.precision),
         };
       }
     }
