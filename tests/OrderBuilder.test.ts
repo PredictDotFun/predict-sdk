@@ -34,6 +34,18 @@ describe("OrderBuilder", () => {
       expect(result.takerAmount).toBe(toWei(5));
     });
 
+    it("should calculate correct amounts for BUY order with makerAmount rounding", () => {
+      const result = orderBuilder.getLimitOrderAmounts({
+        side: Side.BUY,
+        pricePerShareWei: toWei(3.77),
+        quantityWei: 19_000_000_000_000_002_097_152n,
+      });
+
+      expect(result.pricePerShare).toBe(toWei(3.77));
+      expect(result.makerAmount).toBe(71_630_000_000_000_000_000_000n);
+      expect(result.takerAmount).toBe(19_000_000_000_000_002_097_152n);
+    });
+
     it("should calculate correct amounts for SELL order", () => {
       const result = orderBuilder.getLimitOrderAmounts({
         side: Side.SELL,
@@ -44,6 +56,18 @@ describe("OrderBuilder", () => {
       expect(result.pricePerShare).toBe(toWei(2));
       expect(result.makerAmount).toBe(toWei(5));
       expect(result.takerAmount).toBe(toWei(10));
+    });
+
+    it("should calculate correct amounts for SELL order with takerAmount rounding", () => {
+      const result = orderBuilder.getLimitOrderAmounts({
+        side: Side.SELL,
+        pricePerShareWei: toWei(3.77),
+        quantityWei: 19_000_000_000_000_002_097_152n,
+      });
+
+      expect(result.pricePerShare).toBe(toWei(3.77));
+      expect(result.makerAmount).toBe(19_000_000_000_000_002_097_152n);
+      expect(result.takerAmount).toBe(71_630_000_000_000_000_000_000n);
     });
 
     it("should throw InvalidQuantityError for small quantity", () => {
