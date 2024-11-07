@@ -189,12 +189,12 @@ export class OrderBuilder {
             throw new InvalidSignerError();
           }
 
-          return new OrderBuilder(chainId, precision, addresses, generateSalt, signer, contracts, predictAccount);
+          return new OrderBuilder(chainId, precision, addresses, generateSalt, signer, predictAccount, contracts);
         });
       }
     }
 
-    return new OrderBuilder(chainId, precision, addresses, generateSalt, signer, contracts, predictAccount);
+    return new OrderBuilder(chainId, precision, addresses, generateSalt, signer, predictAccount, contracts);
   }
 
   constructor(
@@ -203,8 +203,8 @@ export class OrderBuilder {
     private readonly addresses: Addresses,
     private readonly generateOrderSalt: () => string,
     private readonly signer?: BaseWallet,
-    private readonly contracts?: MulticallContracts,
     private readonly predictAccount?: Address,
+    readonly contracts?: MulticallContracts,
   ) {}
 
   /**
@@ -453,6 +453,81 @@ export class OrderBuilder {
       takerAmount: roundedShares, // min shares they should get for their spend
       lastPrice,
     };
+  }
+
+  /**
+   * Fetches the USDB balance of the connected account or a specific address.
+   *
+   * @param {"USDB"} [token="USDB"] - The token to fetch the balance for.
+   * @param {string | undefined} address - The address to fetch the balance for.
+   * @returns {Promise<bigint>} The USDB balance for the signer or address.
+   */
+  async balanceOf(token: "USDB" = "USDB", address?: string): Promise<bigint> {
+    if (!this.contracts) {
+      throw new MissingSignerError();
+    }
+
+    const { contract } = this.contracts[token];
+    const signer = this.predictAccount ?? this.signer!.address;
+
+    return contract.balanceOf(address ?? signer);
+  }
+
+  /**
+   * Redeems positions for a given condition ID and index set for non-NegRisk markets.
+   *
+   * @param {string} conditionId - The condition ID to redeem positions for.
+   * @param {1 | 2} indexSet - The index set to redeem positions for.
+   * @returns {Promise<TransactionResult>} A promise that resolves to a `TransactionResult` object.
+   */
+  async redeemPositions(conditionId: string, indexSet: 1 | 2): Promise<TransactionResult> {
+    if (!this.contracts) {
+      throw new MissingSignerError();
+    }
+
+    const { contract, codec } = this.contracts.CONDITIONAL_TOKENS;
+    const amounts = [BigInt(indexSet)];
+
+    if (this.predictAccount) {
+      const kernel = this.contracts.KERNEL.contract;
+
+      const args = [this.addresses.USDB, ZeroHash, conditionId, amounts];
+      const encoded = codec.encodeFunctionData("redeemPositions", args);
+      const calldata = this.encodeExecutionCalldata(this.addresses.CONDITIONAL_TOKENS, encoded);
+
+      return this.handleTransaction(kernel.execute, this.executionMode, calldata);
+    } else {
+      return this.handleTransaction(contract.redeemPositions, this.addresses.USDB, ZeroHash, conditionId, amounts);
+    }
+  }
+
+  /**
+   * Redeems positions for a given condition ID, index set and amount for NegRisk markets.
+   *
+   * @param {string} conditionId - The condition ID to redeem positions for.
+   * @param {1 | 2} indexSet - The index set to redeem positions for.
+   * @param {string | bigint} amount - The amount of tokens for a given position to redeem.
+   * @returns {Promise<TransactionResult>} A promise that resolves to a `TransactionResult` object.
+   */
+  async redeemNegRiskPositions(conditionId: string, indexSet: 1 | 2, amount: BigNumberish): Promise<TransactionResult> {
+    if (!this.contracts) {
+      throw new MissingSignerError();
+    }
+
+    const { contract, codec } = this.contracts["NEG_RISK_ADAPTER"];
+    const amounts = indexSet === 1 ? [amount, 0n] : [0n, amount];
+
+    if (this.predictAccount) {
+      const kernel = this.contracts.KERNEL.contract;
+
+      const args = [conditionId, amounts];
+      const encoded = codec.encodeFunctionData("redeemPositions", args);
+      const calldata = this.encodeExecutionCalldata(this.addresses.NEG_RISK_ADAPTER, encoded);
+
+      return this.handleTransaction(kernel.execute, this.executionMode, calldata);
+    } else {
+      return this.handleTransaction(contract.redeemPositions, conditionId, amounts);
+    }
   }
 
   /**
