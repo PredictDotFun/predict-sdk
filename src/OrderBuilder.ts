@@ -19,6 +19,7 @@ import type {
   CancelOrdersOptions,
   SetApprovalsResult,
   Address,
+  MarketHelperValueInput,
 } from "./Types";
 import type { AbstractProvider, BaseWallet, BigNumberish } from "ethers";
 import type { ChainId } from "./Constants";
@@ -45,7 +46,7 @@ import {
   ZeroHash,
 } from "ethers";
 import { MulticallWrapper } from "ethers-multicall-provider";
-import { makeContract, eip712WrapHash } from "./internal/Utils";
+import { makeContract, eip712WrapHash, retainSignificantDigits } from "./internal/Utils";
 import {
   FailedOrderSignError,
   FailedTypedDataEncoderError,
@@ -113,24 +114,39 @@ export class OrderBuilder {
   /**
    * Initializes a new instance of the OrderBuilder class.
    *
-   * @async
    * @param {ChainId} chainId - The chain ID for the network.
-   * @param {BaseWallet} [signer] - Optional signer object for signing orders.
-   * @param {OrderBuilderOptions} [options] - Optional order configuration options; default values are specific for Predict.
+   * @param {undefined} - Do not pass a signer, no contract functionality will be available.
+   * @returns {OrderBuilder} A new OrderBuilder instance without contract functionality.
    */
-  static async make(chainId: ChainId, signer?: BaseWallet, options?: OrderBuilderOptions): Promise<OrderBuilder> {
+  static make(chainId: ChainId, signer?: undefined, options?: OrderBuilderOptions): OrderBuilder;
+  /**
+   * Initializes a new instance of the OrderBuilder class with contract functionality.
+   *
+   * @param {ChainId} chainId - The chain ID for the network.
+   * @param {BaseWallet} signer - Signer object for signing orders. This will cause the method to return a promise.
+   * @param {OrderBuilderOptions} [options] - Optional order configuration options.
+   * @returns {Promise<OrderBuilder>} A new OrderBuilder instance with contract functionality.
+   */
+  static make(chainId: ChainId, signer: BaseWallet, options?: OrderBuilderOptions): Promise<OrderBuilder>;
+  static make(
+    chainId: ChainId,
+    signer: BaseWallet | undefined,
+    options?: OrderBuilderOptions,
+  ): OrderBuilder | Promise<OrderBuilder> {
     let contracts: MulticallContracts | undefined = undefined;
     const addresses = options?.addresses ?? AddressesByChainId[chainId];
     const generateSalt = options?.generateSalt ?? generateOrderSalt;
     const precision = options?.precision ? 10n ** BigInt(options.precision) : BigInt(1e18);
     const predictAccount = options?.predictAccount;
 
-    if (signer) {
-      const provider = signer.provider ?? ProviderByChainId[chainId];
+    let signerWallet = signer;
+
+    if (signerWallet) {
+      const provider = signerWallet.provider ?? ProviderByChainId[chainId];
       const multicallProvider = MulticallWrapper.wrap(provider as AbstractProvider);
 
-      if (!signer.provider) {
-        signer = signer.connect(provider);
+      if (!signerWallet.provider) {
+        signerWallet = signerWallet.connect(provider);
       }
 
       const ctfExchange = makeContract<BlastCTFExchange>(addresses.CTF_EXCHANGE, BlastCTFExchangeAbi);
@@ -148,13 +164,13 @@ export class OrderBuilder {
       );
 
       contracts = {
-        CTF_EXCHANGE: ctfExchange(signer),
-        NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange(signer),
-        NEG_RISK_ADAPTER: negRiskAdapter(signer),
-        CONDITIONAL_TOKENS: conditionalTokens(signer),
-        USDB: usdb(signer),
-        KERNEL: kernel(signer),
-        ECDSA_VALIDATOR: validator(signer),
+        CTF_EXCHANGE: ctfExchange(signerWallet),
+        NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange(signerWallet),
+        NEG_RISK_ADAPTER: negRiskAdapter(signerWallet),
+        CONDITIONAL_TOKENS: conditionalTokens(signerWallet),
+        USDB: usdb(signerWallet),
+        KERNEL: kernel(signerWallet),
+        ECDSA_VALIDATOR: validator(signerWallet),
         multicall: {
           CTF_EXCHANGE: ctfExchange(multicallProvider),
           NEG_RISK_CTF_EXCHANGE: negRiskCtfExchange(multicallProvider),
@@ -168,11 +184,13 @@ export class OrderBuilder {
 
       if (predictAccount) {
         const contract = contracts.ECDSA_VALIDATOR.contract;
-        const owner = await contract.ecdsaValidatorStorage(predictAccount);
+        return contract.ecdsaValidatorStorage(predictAccount).then((owner) => {
+          if (owner !== signerWallet?.address) {
+            throw new InvalidSignerError();
+          }
 
-        if (owner !== signer.address) {
-          throw new InvalidSignerError();
-        }
+          return new OrderBuilder(chainId, precision, addresses, generateSalt, signer, contracts, predictAccount);
+        });
       }
     }
 
@@ -342,15 +360,99 @@ export class OrderBuilder {
     }, reduceInit);
   }
 
-  /**
-   * Rounds down a BigInt number to the nearest multiple.
-   *
-   * @param num - The BigInt number to round.
-   * @param multiple - The BigInt nearest multiple.
-   * @returns The rounded BigInt number.
-   */
-  private roundDownToNearest(num: bigint, multiple: bigint = 10n ** 13n): bigint {
-    return num - (num % multiple);
+  private getMarketOrderAmountsByQuantity(data: MarketHelperInput, book: Optional<Book, "marketId">): OrderAmounts {
+    const { updateTimestampMs, asks, bids } = book;
+
+    if (Date.now() - updateTimestampMs > FIVE_MINUTES_SECONDS * 1000) {
+      console.warn("[WARN]: Order book is potentially stale. Consider using a more recent one.");
+    }
+
+    const qty = retainSignificantDigits(data.quantityWei, 5);
+
+    if (qty < BigInt(1e16)) {
+      throw new InvalidQuantityError();
+    }
+
+    switch (data.side) {
+      case Side.BUY: {
+        const { priceWei, quantityWei, lastPriceWei } = this.processBook(asks, qty);
+        return {
+          lastPrice: lastPriceWei,
+          pricePerShare: quantityWei > 0n ? (priceWei * this.precision) / quantityWei : 0n,
+          makerAmount: (lastPriceWei * quantityWei) / this.precision,
+          takerAmount: quantityWei,
+        };
+      }
+      case Side.SELL: {
+        const { priceWei, quantityWei, lastPriceWei } = this.processBook(bids, qty);
+        return {
+          lastPrice: lastPriceWei,
+          pricePerShare: quantityWei > 0n ? (priceWei * this.precision) / quantityWei : 0n,
+          makerAmount: quantityWei,
+          takerAmount: (lastPriceWei * quantityWei) / this.precision,
+        };
+      }
+    }
+  }
+
+  private getMarketOrderAmountsByValue(data: MarketHelperValueInput, book: Optional<Book, "marketId">): OrderAmounts {
+    const { updateTimestampMs, asks } = book;
+
+    if (Date.now() - updateTimestampMs > FIVE_MINUTES_SECONDS * 1000) {
+      console.warn("[WARN]: Order book is potentially stale. Consider using a more recent one.");
+    }
+
+    if (data.valueWei < BigInt(1e18)) {
+      throw new InvalidQuantityError();
+    }
+
+    const currencyAmountWei = data.valueWei;
+    const { numberOfShares } = asks.reduce(
+      (acc, [_price, _qty]) => {
+        const priceWei = parseEther(_price.toString());
+        const qtyWei = parseEther(_qty.toString());
+
+        const remainingSpend = currencyAmountWei - acc.totalPrice;
+
+        if (remainingSpend <= 0n) {
+          return acc;
+        }
+
+        const tierTotalPrice = (priceWei * qtyWei) / this.precision;
+
+        // check if the market buy can consume this entire price tier
+        // and consume it all if so.
+        if (tierTotalPrice <= remainingSpend) {
+          acc.numberOfShares += qtyWei;
+          acc.totalPrice += (priceWei * qtyWei) / this.precision;
+
+          return acc;
+        }
+
+        // consume as much as we can
+        const fractionalShareAmount = priceWei > 0n ? (remainingSpend * this.precision) / priceWei : 0n;
+
+        acc.numberOfShares += fractionalShareAmount;
+        acc.totalPrice += (priceWei * fractionalShareAmount) / this.precision;
+
+        return acc;
+      },
+      {
+        numberOfShares: 0n,
+        totalPrice: 0n,
+      },
+    );
+
+    const roundedShares = retainSignificantDigits(numberOfShares, 5);
+    const amounts = this.getMarketOrderAmountsByQuantity({ side: data.side, quantityWei: roundedShares }, book);
+    const { lastPrice, pricePerShare } = amounts;
+
+    return {
+      pricePerShare,
+      makerAmount: (lastPrice * roundedShares) / this.precision, // max user can spend (signed against highest asl)
+      takerAmount: roundedShares, // min shares they should get for their spend
+      lastPrice,
+    };
   }
 
   /**
@@ -393,19 +495,26 @@ export class OrderBuilder {
       throw new InvalidQuantityError();
     }
 
+    // Truncate to 3 significant digits for price, and 5 for quantity
+    // This helps avoid precision loss when calculating the amounts.
+    const price = retainSignificantDigits(data.pricePerShareWei, 3);
+    const qty = retainSignificantDigits(data.quantityWei, 5);
+
     switch (data.side) {
       case Side.BUY: {
         return {
-          pricePerShare: data.pricePerShareWei,
-          makerAmount: this.roundDownToNearest((data.pricePerShareWei * data.quantityWei) / this.precision),
-          takerAmount: data.quantityWei,
+          pricePerShare: price,
+          makerAmount: (price * qty) / this.precision,
+          takerAmount: qty,
+          lastPrice: price,
         };
       }
       case Side.SELL: {
         return {
-          pricePerShare: data.pricePerShareWei,
-          makerAmount: data.quantityWei,
-          takerAmount: this.roundDownToNearest((data.pricePerShareWei * data.quantityWei) / this.precision),
+          pricePerShare: price,
+          makerAmount: qty,
+          takerAmount: (price * qty) / this.precision,
+          lastPrice: price,
         };
       }
     }
@@ -415,41 +524,22 @@ export class OrderBuilder {
    * Helper function to calculate the amounts for a MARKET strategy order.
    * @remarks The order book should be retrieved from the `GET /orderbook/{marketId}` endpoint.
    *
-   * @param {MarketHelperInput} data - The data required to calculate the amounts.
+   * @param {MarketHelperInput | MarketHelperValueInput} data - The data required to calculate the amounts. Quantity represents value for
+   *                                   a market buy, and share quantity for a market sell.
    * @param {Book} book - The order book to use for the calculation. The depth levels sorted by price in ascending order.
    * @returns {OrderAmounts} An object containing the average price per share, maker amount, and taker amount.
    *
-   * @throws {InvalidQuantityError} quantityWei must be greater than 1e18.
+   * @throws {InvalidQuantityError} quantityWei must be greater than 1e16.
    */
-  getMarketOrderAmounts(data: MarketHelperInput, book: Optional<Book, "marketId">): OrderAmounts {
-    const { updateTimestampMs, asks, bids } = book;
-
-    if (Date.now() - updateTimestampMs > FIVE_MINUTES_SECONDS * 1000) {
-      console.warn("[WARN]: Order book is potentially stale. Consider using a more recent one.");
+  getMarketOrderAmounts(
+    data: MarketHelperInput | MarketHelperValueInput,
+    book: Optional<Book, "marketId">,
+  ): OrderAmounts {
+    if (data.side === Side.BUY && "valueWei" in data) {
+      return this.getMarketOrderAmountsByValue(data, book);
     }
 
-    if (data.quantityWei < BigInt(1e16)) {
-      throw new InvalidQuantityError();
-    }
-
-    switch (data.side) {
-      case Side.BUY: {
-        const { priceWei, quantityWei, lastPriceWei } = this.processBook(asks, data.quantityWei);
-        return {
-          pricePerShare: (priceWei * this.precision) / quantityWei,
-          makerAmount: (lastPriceWei * quantityWei) / this.precision,
-          takerAmount: quantityWei,
-        };
-      }
-      case Side.SELL: {
-        const { priceWei, quantityWei, lastPriceWei } = this.processBook(bids, data.quantityWei);
-        return {
-          pricePerShare: (priceWei * this.precision) / quantityWei,
-          makerAmount: quantityWei,
-          takerAmount: (lastPriceWei * quantityWei) / this.precision,
-        };
-      }
-    }
+    return this.getMarketOrderAmountsByQuantity(data, book);
   }
 
   /**
