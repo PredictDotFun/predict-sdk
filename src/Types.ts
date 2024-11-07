@@ -24,7 +24,23 @@ export type QuoteType = boolean;
 
 export interface MarketHelperInput {
   side: Side;
+  /**
+   * The quantity of shares you would like to trace.
+   *
+   * This can only be used for SELL or BUY orders, however is most
+   * commonly used for SELL orders.
+   */
   quantityWei: bigint;
+}
+
+export interface MarketHelperValueInput {
+  side: Side.BUY;
+
+  /**
+   * The total maximum value to spend on the order.
+   * This is only used for BUY orders.
+   */
+  valueWei: bigint;
 }
 
 export interface ProcessedBookAmounts {
@@ -40,6 +56,7 @@ export interface LimitHelperInput {
 }
 
 export interface OrderAmounts {
+  lastPrice: bigint;
   pricePerShare: bigint;
   makerAmount: bigint;
   takerAmount: bigint;

@@ -24,3 +24,35 @@ export function eip712WrapHash(messageHash: string, domain: TypedDataDomain) {
 
   return keccak256(concat(["0x1901", domainSeparator, finalMessageHash]));
 }
+
+/**
+ * Retains the specified number of significant digits.
+ *
+ * In the case of negative numbers, the significant digits are retained as
+ * expected without the
+ *
+ *
+ * @param num - The bigint number to truncate.
+ * @param significantDigits - The number of significant digits to retain.
+ *
+ * @returns The bigint number with the specified significant digits retained.
+ */
+export function retainSignificantDigits(num: bigint, significantDigits: number): bigint {
+  if (num === BigInt(0)) return BigInt(0);
+
+  const isNegative = num < BigInt(0); // Check if the number is negative
+  const absNum = isNegative ? -num : num; // Work with the absolute value
+
+  // Convert to string to find magnitude (length before trailing zeros)
+  const str = absNum.toString();
+  const magnitude = str.length;
+
+  // Calculate divisor to remove excess digits
+  const excess = magnitude - significantDigits;
+  if (excess <= 0) return num; // Return original number if no truncation is needed
+
+  const divisor = BigInt(10) ** BigInt(excess);
+
+  // Divide then multiply to truncate, and restore the sign
+  return isNegative ? -(absNum / divisor) * divisor : (absNum / divisor) * divisor;
+}

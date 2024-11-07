@@ -1,6 +1,6 @@
 {
   "name": "@predictdotfun/sdk",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "license": "MIT",
   "description": "A TypeScript SDK to help developers interface with the Predict's protocol.",
   "homepage": "https://predict.fun/",
@@ -58,6 +58,7 @@
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "eslint-plugin-unicorn": "^55.0.0",
     "ethers": "^6.13.2",
+    "fast-check": "^3.23.1",
     "husky": "^9.1.6",
     "jest": "^29.7.0",
     "lint-staged": "^15.2.10",

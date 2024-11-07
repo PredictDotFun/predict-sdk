@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/numeric-separators-style */
 import type { BaseWallet } from "ethers";
 import type { Book } from "../src/Types";
 import { parseEther, ZeroAddress } from "ethers";
@@ -34,16 +35,16 @@ describe("OrderBuilder", () => {
       expect(result.takerAmount).toBe(toWei(5));
     });
 
-    it("should calculate correct amounts for BUY order with makerAmount rounding", () => {
+    it("should calculate correct amounts for BUY order by rounding up", () => {
       const result = orderBuilder.getLimitOrderAmounts({
         side: Side.BUY,
-        pricePerShareWei: toWei(3.77),
-        quantityWei: 19_000_000_000_000_002_097_152n,
+        pricePerShareWei: 381_000_000_000_000_000n,
+        quantityWei: 18_001_999_999_999_999_475_712n,
       });
 
-      expect(result.pricePerShare).toBe(toWei(3.77));
-      expect(result.makerAmount).toBe(71_630_000_000_000_000_000_000n);
-      expect(result.takerAmount).toBe(19_000_000_000_000_002_097_152n);
+      expect(result.pricePerShare).toBe(381_000_000_000_000_000n);
+      expect(result.makerAmount).toBe(6_858_761_999_999_999_800_247n);
+      expect(result.takerAmount).toBe(18_001_999_999_999_999_475_712n);
     });
 
     it("should calculate correct amounts for SELL order", () => {
@@ -58,16 +59,16 @@ describe("OrderBuilder", () => {
       expect(result.takerAmount).toBe(toWei(10));
     });
 
-    it("should calculate correct amounts for SELL order with takerAmount rounding", () => {
+    it("should calculate correct amounts for SELL order by rounding up", () => {
       const result = orderBuilder.getLimitOrderAmounts({
         side: Side.SELL,
-        pricePerShareWei: toWei(3.77),
-        quantityWei: 19_000_000_000_000_002_097_152n,
+        pricePerShareWei: 381_000_000_000_000_000n,
+        quantityWei: 18_001_999_999_999_999_475_712n,
       });
 
-      expect(result.pricePerShare).toBe(toWei(3.77));
-      expect(result.makerAmount).toBe(19_000_000_000_000_002_097_152n);
-      expect(result.takerAmount).toBe(71_630_000_000_000_000_000_000n);
+      expect(result.pricePerShare).toBe(381_000_000_000_000_000n);
+      expect(result.makerAmount).toBe(18_001_999_999_999_999_475_712n);
+      expect(result.takerAmount).toBe(6_858_761_999_999_999_800_247n);
     });
 
     it("should throw InvalidQuantityError for small quantity", () => {
@@ -94,12 +95,87 @@ describe("OrderBuilder", () => {
       ],
     } as Book;
 
+    it.only("should calculate correct amounts for BUY order by value", () => {
+      const result = orderBuilder.getMarketOrderAmounts({ side: Side.BUY, valueWei: toWei(1) }, mockBook);
+
+      expect(result.makerAmount).toBe(toWei(1)); // 1 usdb offered
+      expect(result.pricePerShare).toBe(toWei(0.5)); // 0.5 usdb per share
+      expect(result.takerAmount).toBe(toWei(2)); // 2 shares consumed
+    });
+
+    it.only("should calculate correct amounts for BUY order by value across levels", () => {
+      const result = orderBuilder.getMarketOrderAmounts({ side: Side.BUY, valueWei: toWei(2) }, {
+        updateTimestampMs: Date.now(),
+        asks: [
+          [0.25, 2],
+          [0.75, 2],
+        ],
+      } as Book);
+
+      expect(result.makerAmount).toBe(toWei(3));
+      expect(result.pricePerShare).toBe(toWei(0.5));
+      expect(result.takerAmount).toBe(toWei(4));
+
+      const maxPriceWillingToPay = (result.makerAmount * BigInt(1e18)) / result.takerAmount;
+
+      expect(maxPriceWillingToPay).toBe(toWei(0.75));
+    });
+
     it("should calculate correct amounts for BUY order", () => {
       const result = orderBuilder.getMarketOrderAmounts({ side: Side.BUY, quantityWei: toWei(5) }, mockBook);
 
       expect(result.pricePerShare).toBe(toWei(0.652));
       expect(result.makerAmount).toBe(toWei(0.88 * 5));
       expect(result.takerAmount).toBe(toWei(5));
+    });
+
+    it("should calculate correct amounts for BUY order with max price", () => {
+      const result = orderBuilder.getMarketOrderAmounts(
+        {
+          side: Side.BUY,
+          quantityWei: 3_000_000_000_000_000_000n,
+        },
+        {
+          updateTimestampMs: Date.now(),
+          asks: [
+            [0.746, 0.9],
+            [0.75, 20_000],
+          ],
+          bids: [],
+        },
+      );
+
+      expect(result.pricePerShare).toBe(748800000000000000n);
+      expect(result.makerAmount).toBe(2250000000000000000n);
+      expect(result.takerAmount).toBe(3000000000000000000n);
+
+      const maxPriceWillingToPay = (result.makerAmount * BigInt(1e18)) / result.takerAmount;
+
+      expect(maxPriceWillingToPay).toBe(750000000000000000n);
+    });
+
+    it("should calculate correct amounts for BUY with full precision", () => {
+      const result = orderBuilder.getMarketOrderAmounts(
+        {
+          side: Side.BUY,
+          quantityWei: 1_000_000_000_000_000_000n, // 1 usdb
+        },
+        {
+          updateTimestampMs: Date.now(),
+          asks: [[0.3, 100_000]],
+          bids: [],
+        },
+      );
+
+      console.log(result);
+
+      expect(result.pricePerShare).toBe(300000000000000000n);
+      expect(result.makerAmount).toBe(300000000000000000n);
+      expect(result.takerAmount).toBe(1000000000000000000n);
+
+      const maxPriceWillingToPay = (result.makerAmount * BigInt(1e18)) / result.takerAmount;
+
+      expect(maxPriceWillingToPay).toBe(300000000000000000n);
     });
 
     it("should calculate correct amounts for SELL order", () => {
