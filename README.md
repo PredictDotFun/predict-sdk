@@ -22,7 +22,7 @@ Before trading, you need to set approvals for ERC-1155 (`ConditionalTokens`) and
 
 The following example demonstrates how to set the necessary approvals using the SDK utils.
 
-```ts
+```typescript
 import { Wallet, MaxInt256 } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
@@ -78,7 +78,7 @@ Here's an example of how to use a Predict account to create/cancel orders and se
 8. **Sign Order**: Obtain a `SignedOrder` object by calling `signTypedDataOrder`.
 9. **Compute Order Hash**: Compute the order hash using `buildTypedDataHash`.
 
-```ts
+```typescript
 import { Wallet } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
@@ -133,7 +133,7 @@ Here's an example of how to use the OrderBuilder to create and sign a `LIMIT` st
 7. **Sign Order**: Obtain a `SignedOrder` object by calling `signTypedDataOrder`.
 8. **Compute Order Hash**: Compute the order hash using `buildTypedDataHash`.
 
-```ts
+```typescript
 import { Wallet } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
@@ -231,7 +231,7 @@ Similarly to the above, here's the flow to create a `MARKET` sell order:
 8. **Sign Order**: Obtain a `SignedOrder` object by calling `signTypedDataOrder`.
 9. **Compute Order Hash**: Compute the order hash using `buildTypedDataHash`.
 
-```ts
+```typescript
 import { Wallet } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
@@ -320,11 +320,131 @@ async function createOrder(builder: OrderBuilder) {
 }
 ```
 
+## Redeem Positions
+
+The `OrderBuilder` class provides methods to redeem your positions on the Predict protocol. Depending on the type of market you're interacting with, you can use either `redeemPositions` for standard markets or `redeemNegRiskPositions` for NegRisk markets.
+
+1. **Create a Wallet**: Initialize a wallet that will be used to sign the redemption transaction.
+2. **Initialize `OrderBuilder`**: Instantiate the `OrderBuilder` class by calling the static `make` method.
+3. **Redeem Positions**: Call the `redeemPositions` method with the appropriate `conditionId` and `indexSet`.
+
+The `conditionId` and `indexSet` can be fetched from the `GET /positions` endpoint.
+
+```typescript
+import { Wallet } from "ethers";
+import { OrderBuilder, ChainId } from "@predictdotfun/sdk";
+
+// Initialize the wallet with your private key
+const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
+
+// The main function initiates the OrderBuilder (only once per signer)
+// Then provides it as dependency to other functions
+async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  await redeemPositions(builder);
+  await redeemNegRiskPositions(builder);
+}
+
+async function redeemPositions(orderBuilder: OrderBuilder) {
+  const conditionId = "CONDITION_ID_FROM_API"; // A hash string
+  const indexSet = "INDEX_SET_FROM_API"; // 1 or 2 based on the position you want to redeem
+
+  const result = await builder.redeemPositions(conditionId, indexSet);
+
+  if (result.success) {
+    console.log("Positions redeemed successfully:", result.receipt);
+  } else {
+    console.error("Failed to redeem positions:", result.cause);
+  }
+}
+
+async function redeemNegRiskPositions(orderBuilder: OrderBuilder) {
+  const conditionId = "CONDITION_ID_FROM_API"; // A hash string
+  const indexSet = "INDEX_SET_FROM_API"; // 1 or 2 based on the position you want to redeem
+  const amount = "POSITION_AMOUNT_FROM_API"; // The amount to redeem, usually the max
+
+  const result = await builder.redeemNegRiskPositions(conditionId, indexSet, amount);
+
+  if (result.success) {
+    console.log("Positions redeemed successfully:", result.receipt);
+  } else {
+    console.error("Failed to redeem positions:", result.cause);
+  }
+}
+```
+
+## Check USDB balance
+
+The method `balanceOf` allows to easily check the current USDB balance of the connected signer.
+
+```typescript
+import { Wallet } from "ethers";
+import { OrderBuilder, ChainId } from "@predictdotfun/sdk";
+
+// Initialize the wallet with your private key
+const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
+
+// The main function initiates the OrderBuilder (only once per signer)
+// Then provides it as dependency to other functions
+async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  await checkBalance(builder);
+}
+
+async function checkBalance(orderBuilder: OrderBuilder) {
+  // Fetch the current account/wallet balance in wei
+  const balanceWei = await builder.balanceOf();
+
+  // Example check
+  if (balanceWei >= orderAmountWei) {
+    console.log("Enough balance to create the order");
+  } else {
+    console.error("Not enough balance to create the order");
+  }
+}
+```
+
 ## Contracts
 
-To facilitate interactions with Predict's contracts we provide the necessary ABIs and some common functions to get you started.
+To facilitate interactions with Predict's contracts we expose the necessary instances of each contract, including ABIs and types.
 
-```ts
+```typescript
+import { OrderBuilder } from "@predictdotfun/sdk";
+import { Wallet } from "ethers";
+
+// Create a wallet to interact with on-chain contracts
+const signer = new Wallet(process.env.WALLET_PRIVATE_KEY);
+
+// The main function initiates the OrderBuilder (only once per signer)
+// Then provides it as dependency to other functions
+async function main() {
+  // Create a new instance of the OrderBuilder class. Note: This should only be done once per signer
+  const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
+
+  await callContracts(builder);
+}
+
+async function callContracts(orderBuilder: OrderBuilder) {
+  // If the signer is not provided within `OrderBuilder.make` the contracts won't be initiated
+  if (!orderBuilder.contracts) {
+    throw new Error("The signer was not provided during the OrderBuilder init.");
+  }
+
+  // You can now call contract functions (the actual contract instance is within `contract`)
+  // The `codec` property contains the ethers Interface, useful to encode and decode data
+  const balance = await orderBuilder.contracts["USDB"].contract.balanceOf(signer.address);
+}
+```
+
+### Other utils
+
+Some other useful utils, ABIs and types exposed by the SDK.
+
+```typescript
 import {
   // Supported Chains
   ChainId,
@@ -346,54 +466,9 @@ import {
   BlastConditionalTokensAbi,
   ERC20Abi,
 
-  // Approval utils
+  // Order builder
   OrderBuilder,
 } from "@predictdotfun/sdk";
-import { BaseContract, MaxUint256 } from "ethers";
-
-// Create a new JsonRpcProvider instance
-const provider = new JsonRpcProvider(process.env.RPC_PROVIDER_URL);
-
-// Create a wallet to send the transactions on-chain
-const signer = new Wallet(process.env.WALLET_PRIVATE_KEY).connect(provider);
-
-/**
- * Example contract interaction
- */
-
-// Get the addresses for the given chain
-const addresses = AddressesByChainId[ChainId.BlastMainnet];
-
-// Create a new instance of a BaseContract and connect it to the signer
-const usdbContract = new BaseContract(this.addresses.USDB, ERC20Abi).connect(this.signer) as ERC20;
-
-// Make contract calls
-const tx = await usdbContract.approve(addresses.CTF_EXCHANGE, MaxUint256);
-
-// Await for the transaction result
-const receipt = await tx.wait();
-
-// Check for tx success
-const success = receipt.status === 1;
-
-/**
- * Example approval via OrderBuilder
- */
-
-// Create a new instance of the OrderBuilder class
-const builder = await OrderBuilder.make(ChainId.BlastMainnet, signer);
-
-// Call one of the util functions, for e.g. `ctfExchangeAllowance`
-const { allowance, approve } = await builder.ctfExchangeAllowance();
-
-// Send the approval transaction for the maximum amount, or any other amount
-const tx = await approve(MaxUint256);
-
-// Await for the transaction result
-const receipt = await tx.wait();
-
-// Check for tx success
-const success = receipt.status === 1;
 ```
 
 ## Cancel Orders
@@ -401,11 +476,12 @@ const success = receipt.status === 1;
 Here's an example on how to cancel orders via the SDK
 
 1. **Fetch Orders**: Retrieve your open orders using `GET /orders`.
-2. **Group by `isNegRisk`**: Separate orders based on the `isNegRisk` property.
-3. **Cancel Orders**: Call the specific cancel function based on the order(s) type (`isNegRisk`).
-4. **Check Transaction Success**: Check to confirm the transaction was successful.
+2. **Cancel Orders off chain**: Call `POST /orders/cancel` with orderIds and cancel orders from the orderbook
+3. **Group by `isNegRisk`**: Separate orders based on the `isNegRisk` property.
+4. **Cancel Orders**: Call the specific cancel function based on the order(s) type (`isNegRisk`).
+5. **Check Transaction Success**: Check to confirm the transaction was successful.
 
-```ts
+```typescript
 import { Wallet } from "ethers";
 import { OrderBuilder, ChainId, Side } from "@predictdotfun/sdk";
 
